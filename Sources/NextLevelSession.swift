@@ -878,3 +878,42 @@ extension NextLevelSession {
     }
 
 }
+
+// MARK: - Async/Await API
+
+/// Modern async/await API for NextLevelSession
+@available(iOS 15.0, *)
+extension NextLevelSession {
+
+    /// Merges all existing recorded clips in the session and exports to a file using async/await.
+    ///
+    /// This is a modern Swift Concurrency wrapper around the completion handler-based ``mergeClips(usingPreset:completionHandler:)`` method.
+    ///
+    /// - Parameter preset: AVAssetExportSession preset name for export (e.g., AVAssetExportPresetHighestQuality)
+    /// - Returns: URL of the merged video file
+    /// - Throws: Error if the merge operation fails
+    ///
+    /// ## Example
+    /// ```swift
+    /// do {
+    ///     let url = try await session.mergeClips(usingPreset: AVAssetExportPresetHighestQuality)
+    ///     print("Merged video saved to: \(url)")
+    /// } catch {
+    ///     print("Merge failed: \(error)")
+    /// }
+    /// ```
+    public func mergeClips(usingPreset preset: String) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            self.mergeClips(usingPreset: preset) { url, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else if let url = url {
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(throwing: NextLevelError.unknown)
+                }
+            }
+        }
+    }
+}
+

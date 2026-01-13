@@ -1,4 +1,4 @@
-// swift-tools-version:5.7
+// swift-tools-version:6.0
 //
 //  Package.swift
 //  NextLevel (http://nextlevel.engineering/)
@@ -28,7 +28,7 @@ import PackageDescription
 let package = Package(
     name: "NextLevel",
     platforms: [
-      .iOS(.v14)
+      .iOS(.v15)
     ],
     products: [
       .library(name: "NextLevel", targets: ["NextLevel"])
@@ -36,8 +36,12 @@ let package = Package(
     targets: [
       .target(
           name: "NextLevel",
-          path: "Sources"
+          path: "Sources",
+          swiftSettings: [
+              .enableUpcomingFeature("StrictConcurrency"),
+              .enableUpcomingFeature("ExistentialAny")
+          ]
       )
     ],
-    swiftLanguageVersions: [.v5]
+    swiftLanguageModes: [.version("6")]
 )

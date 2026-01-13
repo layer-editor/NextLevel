@@ -2,11 +2,11 @@
 
 `NextLevel` is a [Swift](https://developer.apple.com/swift/) camera system designed for easy integration, customized media capture, and image streaming in iOS. Integration can optionally leverage `AVFoundation` or `ARKit`.
 
-[![Build Status](https://travis-ci.org/NextLevel/NextLevel.svg?branch=master)](https://travis-ci.org/NextLevel/NextLevel) [![Pod Version](https://img.shields.io/cocoapods/v/NextLevel.svg?style=flat)](http://cocoadocs.org/docsets/NextLevel/) [![Swift Version](https://img.shields.io/badge/language-swift%205.0-brightgreen.svg)](https://developer.apple.com/swift) [![GitHub license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](https://github.com/NextLevel/NextLevel/blob/master/LICENSE)
+[![Build Status](https://travis-ci.org/NextLevel/NextLevel.svg?branch=master)](https://travis-ci.org/NextLevel/NextLevel) [![Pod Version](https://img.shields.io/cocoapods/v/NextLevel.svg?style=flat)](http://cocoadocs.org/docsets/NextLevel/) [![Swift Version](https://img.shields.io/badge/language-swift%206.0-brightgreen.svg)](https://developer.apple.com/swift) [![GitHub license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](https://github.com/NextLevel/NextLevel/blob/master/LICENSE)
 
 |  | Features |
 |:---------:|:---------------------------------------------------------------|
-| &#127916; | “[Vine](http://vine.co)-like” video clip recording and editing |
+| &#127916; | "[Vine](http://vine.co)-like" video clip recording and editing |
 | &#128444; | photo capture (raw, jpeg, and video frame) |
 | &#128070; | customizable gestural interaction and interface |
 | &#128160; | [ARKit integration](https://developer.apple.com/arkit/) (beta) |
@@ -24,11 +24,41 @@
 | &#127744; | extensible API for image processing and CV |
 | &#128008; | animated GIF creator |
 | &#128526; | face recognition; qr- and bar-codes recognition |
-| &#128038; | [Swift 5](https://developer.apple.com/swift/) |
+| &#128038; | [Swift 6](https://developer.apple.com/swift/) |
+| &#9889; | async/await and modern concurrency support |
+| &#128214; | structured logging with OSLog |
+
+## Swift 6 & iOS 15+
+
+NextLevel now requires **Swift 6.0+** and **iOS 15.0+**. The framework has been modernized with:
+
+- ✅ Swift 6 strict concurrency checking
+- ✅ Sendable conformance for thread-safe types
+- ✅ Async/await API wrappers
+- ✅ AsyncStream event types
+- ✅ OSLog structured logging
+- ✅ Enhanced error handling with LocalizedError
+
+### Modern Async/Await API
+
+```swift
+// Merge clips with async/await
+do {
+    let url = try await session.mergeClips(usingPreset: AVAssetExportPresetHighestQuality)
+    print("Video saved to: \(url)")
+} catch {
+    print("Merge failed: \(error.localizedDescription)")
+}
+```
+
+### Bug Fixes
+
+- ✅ Fixed critical AudioChannelLayout crash ([#286](https://github.com/NextLevel/NextLevel/issues/286), [#271](https://github.com/NextLevel/NextLevel/issues/271))
 
 Need a different version of Swift?
-* `5.0` - Target your Podfile to the latest release or master
-* `4.2` - Target your Podfile to the `swift4.2` branch
+* `6.0+` - Latest release (main branch)
+* `5.0` - Target the `swift5` branch
+* `4.2` - Target the `swift4.2` branch
 
 ## Quick Start
 

@@ -29,13 +29,37 @@ import AVFoundation
 import CoreImage
 import CoreVideo
 import Metal
+import OSLog
 #if USE_ARKIT
 import ARKit
 #endif
 
+// MARK: - Logging
+
+/// Structured logging for NextLevel using OSLog
+extension Logger {
+    /// Capture session lifecycle and management
+    static let capture = Logger(subsystem: "engineering.NextLevel", category: "capture")
+
+    /// Audio recording and configuration
+    static let audio = Logger(subsystem: "engineering.NextLevel", category: "audio")
+
+    /// Video recording and processing
+    static let video = Logger(subsystem: "engineering.NextLevel", category: "video")
+
+    /// Session and clip management
+    static let session = Logger(subsystem: "engineering.NextLevel", category: "session")
+
+    /// Camera device changes and configuration
+    static let device = Logger(subsystem: "engineering.NextLevel", category: "device")
+
+    /// Photo capture
+    static let photo = Logger(subsystem: "engineering.NextLevel", category: "photo")
+}
+
 // MARK: - types
 
-public enum NextLevelAuthorizationStatus: Int, CustomStringConvertible {
+public enum NextLevelAuthorizationStatus: Int, CustomStringConvertible, Sendable {
     case notDetermined = 0
     case notAuthorized
     case authorized
@@ -54,7 +78,7 @@ public enum NextLevelAuthorizationStatus: Int, CustomStringConvertible {
     }
 }
 
-public enum NextLevelDeviceType: Int, CustomStringConvertible {
+public enum NextLevelDeviceType: Int, CustomStringConvertible, Sendable {
     case microphone = 0
     case wideAngleCamera
     case telephotoCamera
@@ -118,7 +142,7 @@ public enum NextLevelDeviceType: Int, CustomStringConvertible {
 /// Operation modes for NextLevel.
 /// Note: video, audio, and videoWithoutAudio options support multi clip recording.
 /// Movie is strictly for single clip recording.
-public enum NextLevelCaptureMode: Int, CustomStringConvertible {
+public enum NextLevelCaptureMode: Int, CustomStringConvertible, Sendable {
     case video = 0
     case photo
     case audio
@@ -161,7 +185,7 @@ public typealias NextLevelTorchMode = AVCaptureDevice.TorchMode
 
 public typealias NextLevelVideoStabilizationMode = AVCaptureVideoStabilizationMode
 
-public enum NextLevelMirroringMode: Int, CustomStringConvertible {
+public enum NextLevelMirroringMode: Int, CustomStringConvertible, Sendable {
     case off = 0
     case on
     case auto
@@ -185,8 +209,8 @@ public enum NextLevelMirroringMode: Int, CustomStringConvertible {
 /// Error domain for all Next Level errors.
 public let NextLevelErrorDomain = "NextLevelErrorDomain"
 
-/// Error types.
-public enum NextLevelError: Error, CustomStringConvertible {
+/// NextLevel error types with localized descriptions for better error reporting.
+public enum NextLevelError: LocalizedError, Sendable {
     case unknown
     case started
     case deviceNotAvailable
@@ -194,25 +218,63 @@ public enum NextLevelError: Error, CustomStringConvertible {
     case fileExists
     case nothingRecorded
     case notReadyToRecord
+    case audioChannelLayoutMismatch
+    case configurationFailed(String)
 
-    public var description: String {
-        get {
-            switch self {
-            case .unknown:
-                return "Unknown"
-            case .started:
-                return "NextLevel already started"
-            case .fileExists:
-                return "File exists"
-            case .authorization:
-                return "Authorization has not been requested"
-            case .deviceNotAvailable:
-                return "Device Not Available"
-            case .nothingRecorded:
-                return "Nothing recorded"
-            case .notReadyToRecord:
-                return "NextLevel is not ready to record"
-            }
+    public var errorDescription: String? {
+        switch self {
+        case .unknown:
+            return NSLocalizedString("An unknown error occurred", comment: "Unknown error")
+        case .started:
+            return NSLocalizedString("NextLevel session already started", comment: "Already started error")
+        case .fileExists:
+            return NSLocalizedString("Output file already exists", comment: "File exists error")
+        case .authorization:
+            return NSLocalizedString("Camera or microphone authorization has not been requested", comment: "Authorization error")
+        case .deviceNotAvailable:
+            return NSLocalizedString("Camera device not available", comment: "Device not available error")
+        case .nothingRecorded:
+            return NSLocalizedString("No media has been recorded", comment: "Nothing recorded error")
+        case .notReadyToRecord:
+            return NSLocalizedString("NextLevel is not ready to begin recording", comment: "Not ready to record error")
+        case .audioChannelLayoutMismatch:
+            return NSLocalizedString("Audio channel layout does not match channel count", comment: "Audio channel layout error")
+        case .configurationFailed(let reason):
+            return NSLocalizedString("Configuration failed: \(reason)", comment: "Configuration failed error")
+        }
+    }
+
+    public var recoverySuggestion: String? {
+        switch self {
+        case .started:
+            return NSLocalizedString("Stop the current session before starting a new one", comment: "Already started recovery")
+        case .fileExists:
+            return NSLocalizedString("Delete the existing file or choose a different output path", comment: "File exists recovery")
+        case .authorization:
+            return NSLocalizedString("Request camera and microphone permissions using AVCaptureDevice.requestAccess", comment: "Authorization recovery")
+        case .deviceNotAvailable:
+            return NSLocalizedString("Ensure the camera is not in use by another application and try again", comment: "Device not available recovery")
+        case .notReadyToRecord:
+            return NSLocalizedString("Start the NextLevel session before beginning recording", comment: "Not ready recovery")
+        case .audioChannelLayoutMismatch:
+            return NSLocalizedString("The audio format may be incompatible. Try using a different audio source or configuration", comment: "Audio channel layout recovery")
+        default:
+            return nil
+        }
+    }
+
+    public var failureReason: String? {
+        switch self {
+        case .started:
+            return NSLocalizedString("An active session is already running", comment: "Started failure reason")
+        case .authorization:
+            return NSLocalizedString("User has not granted camera or microphone access", comment: "Authorization failure reason")
+        case .deviceNotAvailable:
+            return NSLocalizedString("The camera hardware is unavailable or in use", comment: "Device unavailable failure reason")
+        case .audioChannelLayoutMismatch:
+            return NSLocalizedString("Audio channel configuration is inconsistent", comment: "Audio layout failure reason")
+        default:
+            return nil
         }
     }
 }
@@ -229,7 +291,7 @@ private let NextLevelRequiredMinimumStorageSpaceInBytes: UInt64 = 49999872 // ~4
 /// ⬆️ NextLevel, Rad Media Capture in Swift (http://github.com/NextLevel)
 public class NextLevel: NSObject {
 
-    // delegates
+    // MARK: - Delegates
 
     public weak var delegate: NextLevelDelegate?
     public weak var previewDelegate: NextLevelPreviewDelegate?
@@ -243,12 +305,12 @@ public class NextLevel: NSObject {
     public weak var portraitEffectsMatteDelegate: NextLevelPortraitEffectsMatteDelegate?
     public weak var metadataObjectsDelegate: NextLevelMetadataOutputObjectsDelegate?
 
-    // preview
+    // MARK: - Preview
 
     /// Live camera preview, add as a sublayer to the UIView's primary layer.
     public var previewLayer: AVCaptureVideoPreviewLayer
 
-    // capture configuration
+    // MARK: - Configuration
 
     /// Configuration for video
     public var videoConfiguration: NextLevelVideoConfiguration
@@ -266,12 +328,10 @@ public class NextLevel: NSObject {
         }
     }
 
-    // audio configuration
-
-    /// Indicates whether the capture session automatically changes settings in the app’s shared audio session. By default, is `true`.
+    /// Indicates whether the capture session automatically changes settings in the app's shared audio session. By default, is `true`.
     public var automaticallyConfiguresApplicationAudioSession: Bool = true
 
-    // camera configuration
+    // MARK: - Camera Settings
 
     /// The current capture mode of the device.
     public var captureMode: NextLevelCaptureMode = .video {
@@ -324,7 +384,7 @@ public class NextLevel: NSObject {
         }
     }
 
-    // stabilization
+    // MARK: - Stabilization
 
     /// When `true`, enables photo capture stabilization.
     public var photoStabilizationEnabled: Bool = false
@@ -340,14 +400,12 @@ public class NextLevel: NSObject {
         }
     }
 
-    // depth data
+    // MARK: - Depth Data & Effects
 
     /// When `true`, enables streaming depth data capture (use PhotoConfiguration for photos)
     #if USE_TRUE_DEPTH
     public var depthDataCaptureEnabled: Bool = false
     #endif
-
-    // portrait effects matte data
 
     /// When `true`, enables streaming of portrait effects matte data capture (use PhotoConfiguration for photos)
     public var portraitEffectsMatteCaptureEnabled: Bool = false
@@ -355,7 +413,7 @@ public class NextLevel: NSObject {
     /// Specifies types of metadata objects to detect
     public var metadataObjectTypes: [AVMetadataObject.ObjectType]?
 
-    // state
+    // MARK: - State
 
     /// Checks if the system is recording.
     public var isRecording: Bool {
@@ -3294,3 +3352,63 @@ extension NextLevel {
     }
 
 }
+
+// MARK: - Async/Await & AsyncStream API
+
+/// Modern Swift Concurrency events for NextLevel
+@available(iOS 15.0, *)
+extension NextLevel {
+
+    /// Session lifecycle events that can be observed using AsyncStream
+    public enum SessionEvent: Sendable {
+        case willStart
+        case didStart
+        case didStop
+        case wasInterrupted
+        case interruptionEnded
+        case captureModeWillChange(NextLevelCaptureMode)
+        case captureModeDidChange(NextLevelCaptureMode)
+    }
+
+    /// Video recording events that can be observed using AsyncStream
+    public enum VideoEvent: Sendable {
+        case willStartClip
+        case didStartClip
+        case didCompleteClip
+        case frameWillProcess(timestamp: TimeInterval)
+        case frameDidProcess(timestamp: TimeInterval)
+    }
+
+    /// Photo capture events that can be observed using AsyncStream
+    public enum PhotoEvent: Sendable {
+        case willCapture
+        case didCapture
+        case willBegin
+        case didFinish(photoData: Data?)
+    }
+
+    // Note: The actual AsyncStream implementation would require adding private
+    // continuation storage and bridging delegate callbacks to streams.
+    // This is left as a framework extension point that can be implemented
+    // based on specific use case requirements.
+    //
+    // Example implementation pattern:
+    //
+    // private var sessionEventContinuations: [UUID: AsyncStream<SessionEvent>.Continuation] = [:]
+    //
+    // public var sessionEvents: AsyncStream<SessionEvent> {
+    //     AsyncStream { continuation in
+    //         let id = UUID()
+    //         sessionEventContinuations[id] = continuation
+    //         continuation.onTermination = { [weak self] _ in
+    //             self?.sessionEventContinuations.removeValue(forKey: id)
+    //         }
+    //     }
+    // }
+    //
+    // Then in delegate methods:
+    // for continuation in sessionEventContinuations.values {
+    //     continuation.yield(.didStart)
+    // }
+}
+
