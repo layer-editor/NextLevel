@@ -343,6 +343,9 @@ public class NextLevel: NSObject {
                 }
 
             self.delegate?.nextLevelCaptureModeWillChange(self)
+            if #available(iOS 15.0, *) {
+                self.publishSessionEvent(.captureModeWillChange(self.captureMode))
+            }
 
             self.executeClosureAsyncOnSessionQueueIfNecessary {
                 self.configureSession()
@@ -350,6 +353,9 @@ public class NextLevel: NSObject {
                 self.configureMetadataObjects()
                 self.updateVideoOrientation()
                 self.delegate?.nextLevelCaptureModeDidChange(self)
+                if #available(iOS 15.0, *) {
+                    self.publishSessionEvent(.captureModeDidChange(self.captureMode))
+                }
             }
         }
     }
@@ -472,6 +478,16 @@ public class NextLevel: NSObject {
     internal var _recordingSession: NextLevelSession?
     internal var _lastVideoFrameTimeInterval: TimeInterval = 0
 
+    // Task management for proper cancellation
+    internal var _activeTasks: [Task<Void, Never>] = []
+    internal var _tasksLock = NSLock()
+
+    // AsyncStream continuations for event publishing (iOS 15+)
+    // Stored as Any to avoid @available on stored properties
+    private var _sessionEventContinuation: Any?
+    private var _videoEventContinuation: Any?
+    private var _photoEventContinuation: Any?
+
     internal var _videoCustomContextRenderingEnabled: Bool = false
     internal var _sessionVideoCustomContextImageBuffer: CVPixelBuffer?
 
@@ -544,6 +560,9 @@ public class NextLevel: NSObject {
     }
 
     deinit {
+        // Cancel all active tasks
+        self.cancelAllTasks()
+
         self.delegate = nil
         self.previewDelegate = nil
         self.deviceDelegate = nil
@@ -669,6 +688,9 @@ extension NextLevel {
 
     /// Stops the current recording session.
     public func stop() {
+        // Cancel all active tasks before stopping session
+        self.cancelAllTasks()
+
         if let session = self._captureSession {
             self.executeClosureAsyncOnSessionQueueIfNecessary {
                 if session.isRunning == true {
@@ -723,6 +745,9 @@ extension NextLevel {
 
                 if session.isRunning == false {
                     self.delegate?.nextLevelSessionWillStart(self)
+                    if #available(iOS 15.0, *) {
+                        self.publishSessionEvent(.willStart)
+                    }
                     session.startRunning()
                     self.previewDelegate?.nextLevelWillStartPreview(self)
 
@@ -763,11 +788,17 @@ extension NextLevel {
             }
 
             self.delegate?.nextLevelSessionWillStart(self)
+            if #available(iOS 15.0, *) {
+                self.publishSessionEvent(.willStart)
+            }
             self.arConfiguration?.session?.run(config, options: options)
             self._arRunning = true
 
             DispatchQueue.main.async {
                 self.delegate?.nextLevelSessionDidStart(self)
+                if #available(iOS 15.0, *) {
+                    self.publishSessionEvent(.didStart)
+                }
             }
         }
         #endif
@@ -1397,9 +1428,11 @@ extension NextLevel {
 
     internal func updateVideoOrientation() {
         if let session = self._recordingSession {
-            if session.currentClipHasAudio == false && session.currentClipHasVideo == false {
-                session.reset()
+            let task = Task {
+                guard !Task.isCancelled else { return }
+                _ = await session.resetIfEmpty()
             }
+            self.trackTask(task)
         }
 
         var didChangeOrientation = false
@@ -2549,13 +2582,20 @@ extension NextLevel {
     public func pause(withCompletionHandler completionHandler: (() -> Void)? = nil) {
         self._recording = false
 
-        self.executeClosureAsyncOnSessionQueueIfNecessary {
+        let task = Task {
+            guard !Task.isCancelled else {
+                completionHandler?()
+                return
+            }
             if let session = self._recordingSession {
-                if session.currentClipHasStarted {
-                    session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
+                if await session.currentClipHasStarted {
+                    await session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
                         if let sessionClip = sessionClip {
                             DispatchQueue.main.async {
                                 self.videoDelegate?.nextLevel(self, didCompleteClip: sessionClip, inSession: session)
+                                if #available(iOS 15.0, *) {
+                                    self.publishVideoEvent(.didCompleteClip)
+                                }
                             }
                             if let completionHandler = completionHandler {
                                 DispatchQueue.main.async(execute: completionHandler)
@@ -2574,15 +2614,23 @@ extension NextLevel {
                 DispatchQueue.main.async(execute: completionHandler)
             }
         }
+        self.trackTask(task)
     }
 
     internal func beginRecordingNewClipIfNecessary() {
-        if let session = self._recordingSession,
-            session.isReady == false {
-            session.beginClip()
-            DispatchQueue.main.async {
-                self.videoDelegate?.nextLevel(self, didStartClipInSession: session)
+        if let session = self._recordingSession {
+            let task = Task {
+                guard !Task.isCancelled else { return }
+                if await session.beginClipIfNeeded() {
+                    DispatchQueue.main.async {
+                        self.videoDelegate?.nextLevel(self, didStartClipInSession: session)
+                        if #available(iOS 15.0, *) {
+                            self.publishVideoEvent(.didStartClip)
+                        }
+                    }
+                }
             }
+            self.trackTask(task)
         }
     }
 
@@ -2651,192 +2699,229 @@ extension NextLevel {
     // sample buffer processing
 
     internal func handleVideoOutput(sampleBuffer: CMSampleBuffer, session: NextLevelSession) {
-        if session.isVideoSetup == false {
-            if let settings = self.videoConfiguration.avcaptureSettingsDictionary(sampleBuffer: sampleBuffer),
-                let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
-                if !session.setupVideo(withSettings: settings, configuration: self.videoConfiguration, formatDescription: formatDescription) {
-                    print("NextLevel, could not setup video session")
+        let task = Task {
+            guard !Task.isCancelled else { return }
+            // Setup video if needed (atomic operation)
+            let wasSetup = await session.isVideoSetup
+            if !wasSetup {
+                if let settings = self.videoConfiguration.avcaptureSettingsDictionary(sampleBuffer: sampleBuffer),
+                    let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
+                    if !(await session.setupVideoIfNeeded(withSettings: settings, configuration: self.videoConfiguration, formatDescription: formatDescription)) {
+                        print("NextLevel, could not setup video session")
+                    }
+                }
+                DispatchQueue.main.async {
+                    self.videoDelegate?.nextLevel(self, didSetupVideoInSession: session)
                 }
             }
-            DispatchQueue.main.async {
-                self.videoDelegate?.nextLevel(self, didSetupVideoInSession: session)
+
+            // Get atomic state snapshot for multi-property check
+            guard !Task.isCancelled else { return }
+            let state = await session.getState()
+            if self._recording && (state.isAudioSetup || self.captureMode == .videoWithoutAudio) && state.currentClipHasStarted {
+                self.beginRecordingNewClipIfNecessary()
+
+                let minTimeBetweenFrames = 0.004
+                let sleepDuration = minTimeBetweenFrames - (CACurrentMediaTime() - self._lastVideoFrameTimeInterval)
+                if sleepDuration > 0 {
+                    Thread.sleep(forTimeInterval: sleepDuration)
+                }
+
+                // check with the client to setup/maintain external render contexts
+                let imageBuffer = self.isVideoCustomContextRenderingEnabled == true ? CMSampleBufferGetImageBuffer(sampleBuffer) : nil
+                if let imageBuffer = imageBuffer {
+                    if CVPixelBufferLockBaseAddress(imageBuffer, CVPixelBufferLockFlags(rawValue: 0)) == kCVReturnSuccess {
+                        // only called from captureQueue
+                        self.videoDelegate?.nextLevel(self, renderToCustomContextWithImageBuffer: imageBuffer, onQueue: self._sessionQueue)
+                    } else {
+                        self._sessionVideoCustomContextImageBuffer = nil
+                    }
+                }
+
+                guard let device = self._currentDevice else {
+                    return
+                }
+
+                guard !Task.isCancelled else { return }
+                // when clients modify a frame using their rendering context, the resulting CVPixelBuffer is then passed in here with the original sampleBuffer for recording
+                await session.appendVideo(withSampleBuffer: sampleBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, minFrameDuration: device.activeVideoMinFrameDuration, completionHandler: { (success: Bool) -> Void in
+                    // cleanup client rendering context
+                    if self.isVideoCustomContextRenderingEnabled {
+                        if let imageBuffer = imageBuffer {
+                            CVPixelBufferUnlockBaseAddress(imageBuffer, CVPixelBufferLockFlags(rawValue: 0))
+                        }
+                    }
+
+                    // process frame
+                    self._lastVideoFrameTimeInterval = CACurrentMediaTime()
+                    if success == true {
+                        DispatchQueue.main.async {
+                            self.videoDelegate?.nextLevel(self, didAppendVideoSampleBuffer: sampleBuffer, inSession: session)
+                        }
+                        self.checkSessionDuration()
+                    } else {
+                        DispatchQueue.main.async {
+                            self.videoDelegate?.nextLevel(self, didSkipVideoSampleBuffer: sampleBuffer, inSession: session)
+                        }
+                    }
+                })
+
+                // Check state again for first frame logic
+                let currentState = await session.getState()
+                if !currentState.currentClipHasVideo && (!currentState.currentClipHasAudio || self.captureMode == .videoWithoutAudio) {
+                    if let audioBuffer = self._lastAudioFrame {
+                        let lastAudioEndTime = CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(audioBuffer), CMSampleBufferGetDuration(audioBuffer))
+                        let videoStartTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+
+                        if lastAudioEndTime > videoStartTime {
+                            self.handleAudioOutput(sampleBuffer: audioBuffer, session: session)
+                        }
+                    }
+                }
             }
         }
-
-        if self._recording && (session.isAudioSetup || self.captureMode == .videoWithoutAudio) && session.currentClipHasStarted {
-            self.beginRecordingNewClipIfNecessary()
-
-            let minTimeBetweenFrames = 0.004
-            let sleepDuration = minTimeBetweenFrames - (CACurrentMediaTime() - self._lastVideoFrameTimeInterval)
-            if sleepDuration > 0 {
-                Thread.sleep(forTimeInterval: sleepDuration)
-            }
-
-            // check with the client to setup/maintain external render contexts
-            let imageBuffer = self.isVideoCustomContextRenderingEnabled == true ? CMSampleBufferGetImageBuffer(sampleBuffer) : nil
-            if let imageBuffer = imageBuffer {
-                if CVPixelBufferLockBaseAddress(imageBuffer, CVPixelBufferLockFlags(rawValue: 0)) == kCVReturnSuccess {
-                    // only called from captureQueue
-                    self.videoDelegate?.nextLevel(self, renderToCustomContextWithImageBuffer: imageBuffer, onQueue: self._sessionQueue)
-                } else {
-                    self._sessionVideoCustomContextImageBuffer = nil
-                }
-            }
-
-            guard let device = self._currentDevice else {
-                return
-            }
-
-            // when clients modify a frame using their rendering context, the resulting CVPixelBuffer is then passed in here with the original sampleBuffer for recording
-            session.appendVideo(withSampleBuffer: sampleBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, minFrameDuration: device.activeVideoMinFrameDuration, completionHandler: { (success: Bool) -> Void in
-                // cleanup client rendering context
-                if self.isVideoCustomContextRenderingEnabled {
-                    if let imageBuffer = imageBuffer {
-                        CVPixelBufferUnlockBaseAddress(imageBuffer, CVPixelBufferLockFlags(rawValue: 0))
-                    }
-                }
-
-                // process frame
-                self._lastVideoFrameTimeInterval = CACurrentMediaTime()
-                if success == true {
-                    DispatchQueue.main.async {
-                        self.videoDelegate?.nextLevel(self, didAppendVideoSampleBuffer: sampleBuffer, inSession: session)
-                    }
-                    self.checkSessionDuration()
-                } else {
-                    DispatchQueue.main.async {
-                        self.videoDelegate?.nextLevel(self, didSkipVideoSampleBuffer: sampleBuffer, inSession: session)
-                    }
-                }
-            })
-
-            if session.currentClipHasVideo == false && (session.currentClipHasAudio == false || self.captureMode == .videoWithoutAudio) {
-                if let audioBuffer = self._lastAudioFrame {
-                    let lastAudioEndTime = CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(audioBuffer), CMSampleBufferGetDuration(audioBuffer))
-                    let videoStartTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-
-                    if lastAudioEndTime > videoStartTime {
-                        self.handleAudioOutput(sampleBuffer: audioBuffer, session: session)
-                    }
-                }
-            }
-
-        }
+        self.trackTask(task)
     }
 
     // Beta: handleVideoOutput(pixelBuffer:timestamp:session:) needs to be tested
     internal func handleVideoOutput(pixelBuffer: CVPixelBuffer, timestamp: TimeInterval, session: NextLevelSession) {
-        if session.isVideoSetup == false {
-            if let settings = self.videoConfiguration.avcaptureSettingsDictionary(pixelBuffer: pixelBuffer) {
-                if !session.setupVideo(withSettings: settings, configuration: self.videoConfiguration) {
-                    print("NextLevel, could not setup video session")
+        let task = Task {
+            guard !Task.isCancelled else { return }
+            // Setup video with atomic check
+            let videoSetup = await session.getState().isVideoSetup
+            if !videoSetup {
+                if let settings = self.videoConfiguration.avcaptureSettingsDictionary(pixelBuffer: pixelBuffer) {
+                    if !(await session.setupVideoIfNeeded(withSettings: settings, configuration: self.videoConfiguration)) {
+                        print("NextLevel, could not setup video session")
+                    }
+                }
+                DispatchQueue.main.async {
+                    self.videoDelegate?.nextLevel(self, didSetupVideoInSession: session)
                 }
             }
-            DispatchQueue.main.async {
-                self.videoDelegate?.nextLevel(self, didSetupVideoInSession: session)
+
+            // Get state snapshot for multi-property checks
+            guard !Task.isCancelled else { return }
+            let state = await session.getState()
+            if self._recording && (state.isAudioSetup || self.captureMode == .videoWithoutAudio) && state.currentClipHasStarted {
+                self.beginRecordingNewClipIfNecessary()
+
+                let minTimeBetweenFrames = 0.004
+                let sleepDuration = minTimeBetweenFrames - (CACurrentMediaTime() - self._lastVideoFrameTimeInterval)
+                if sleepDuration > 0 {
+                    Thread.sleep(forTimeInterval: sleepDuration)
+                }
+
+                // check with the client to setup/maintain external render contexts
+                let imageBuffer = self.isVideoCustomContextRenderingEnabled == true ? pixelBuffer : nil
+                if let imageBuffer = imageBuffer {
+                    if CVPixelBufferLockBaseAddress(imageBuffer, CVPixelBufferLockFlags(rawValue: 0)) == kCVReturnSuccess {
+                        // only called from captureQueue
+                        self.videoDelegate?.nextLevel(self, renderToCustomContextWithImageBuffer: imageBuffer, onQueue: self._sessionQueue)
+                    } else {
+                        self._sessionVideoCustomContextImageBuffer = nil
+                    }
+                }
+
+                guard !Task.isCancelled else { return }
+                // when clients modify a frame using their rendering context, the resulting CVPixelBuffer is then passed in here with the original sampleBuffer for recording
+                await session.appendVideo(withPixelBuffer: pixelBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, timestamp: timestamp, minFrameDuration: CMTime(seconds: 1, preferredTimescale: 600), completionHandler: { (success: Bool) -> Void in
+                    // cleanup client rendering context
+                    if self.isVideoCustomContextRenderingEnabled {
+                        if let imageBuffer = imageBuffer {
+                            CVPixelBufferUnlockBaseAddress(imageBuffer, CVPixelBufferLockFlags(rawValue: 0))
+                        }
+                    }
+
+                    // process frame
+                    self._lastVideoFrameTimeInterval = CACurrentMediaTime()
+                    if success {
+                        DispatchQueue.main.async {
+                            self.videoDelegate?.nextLevel(self, didAppendVideoPixelBuffer: pixelBuffer, timestamp: timestamp, inSession: session)
+                        }
+                        self.checkSessionDuration()
+                    } else {
+                        DispatchQueue.main.async {
+                            self.videoDelegate?.nextLevel(self, didSkipVideoPixelBuffer: pixelBuffer, timestamp: timestamp, inSession: session)
+                        }
+                    }
+                })
+
+                // Get fresh state for multi-property check
+                let currentState = await session.getState()
+                if !currentState.currentClipHasVideo && (!currentState.currentClipHasAudio || self.captureMode == .videoWithoutAudio) {
+                    if let audioBuffer = self._lastAudioFrame {
+                        let lastAudioEndTime = CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(audioBuffer), CMSampleBufferGetDuration(audioBuffer))
+                        let videoStartTime = CMTime(seconds: timestamp, preferredTimescale: 600)
+
+                        if lastAudioEndTime > videoStartTime {
+                            self.handleAudioOutput(sampleBuffer: audioBuffer, session: session)
+                        }
+                    }
+                }
             }
         }
-
-        if self._recording && (session.isAudioSetup || self.captureMode == .videoWithoutAudio) && session.currentClipHasStarted {
-            self.beginRecordingNewClipIfNecessary()
-
-            let minTimeBetweenFrames = 0.004
-            let sleepDuration = minTimeBetweenFrames - (CACurrentMediaTime() - self._lastVideoFrameTimeInterval)
-            if sleepDuration > 0 {
-                Thread.sleep(forTimeInterval: sleepDuration)
-            }
-
-            // check with the client to setup/maintain external render contexts
-            let imageBuffer = self.isVideoCustomContextRenderingEnabled == true ? pixelBuffer : nil
-            if let imageBuffer = imageBuffer {
-                if CVPixelBufferLockBaseAddress(imageBuffer, CVPixelBufferLockFlags(rawValue: 0)) == kCVReturnSuccess {
-                    // only called from captureQueue
-                    self.videoDelegate?.nextLevel(self, renderToCustomContextWithImageBuffer: imageBuffer, onQueue: self._sessionQueue)
-                } else {
-                    self._sessionVideoCustomContextImageBuffer = nil
-                }
-            }
-
-            // when clients modify a frame using their rendering context, the resulting CVPixelBuffer is then passed in here with the original sampleBuffer for recording
-            session.appendVideo(withPixelBuffer: pixelBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, timestamp: timestamp, minFrameDuration: CMTime(seconds: 1, preferredTimescale: 600), completionHandler: { (success: Bool) -> Void in
-                // cleanup client rendering context
-                if self.isVideoCustomContextRenderingEnabled {
-                    if let imageBuffer = imageBuffer {
-                        CVPixelBufferUnlockBaseAddress(imageBuffer, CVPixelBufferLockFlags(rawValue: 0))
-                    }
-                }
-
-                // process frame
-                self._lastVideoFrameTimeInterval = CACurrentMediaTime()
-                if success {
-                    DispatchQueue.main.async {
-                        self.videoDelegate?.nextLevel(self, didAppendVideoPixelBuffer: pixelBuffer, timestamp: timestamp, inSession: session)
-                    }
-                    self.checkSessionDuration()
-                } else {
-                    DispatchQueue.main.async {
-                        self.videoDelegate?.nextLevel(self, didSkipVideoPixelBuffer: pixelBuffer, timestamp: timestamp, inSession: session)
-                    }
-                }
-            })
-
-            if session.currentClipHasVideo == false && (session.currentClipHasAudio == false || self.captureMode == .videoWithoutAudio) {
-                if let audioBuffer = self._lastAudioFrame {
-                    let lastAudioEndTime = CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(audioBuffer), CMSampleBufferGetDuration(audioBuffer))
-                    let videoStartTime = CMTime(seconds: timestamp, preferredTimescale: 600)
-
-                    if lastAudioEndTime > videoStartTime {
-                        self.handleAudioOutput(sampleBuffer: audioBuffer, session: session)
-                    }
-                }
-            }
-        }
+        self.trackTask(task)
     }
 
     internal func handleAudioOutput(sampleBuffer: CMSampleBuffer, session: NextLevelSession) {
-        if session.isAudioSetup == false {
-            if let settings = self.audioConfiguration.avcaptureSettingsDictionary(sampleBuffer: sampleBuffer),
-                let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
-                if !session.setupAudio(withSettings: settings, configuration: self.audioConfiguration, formatDescription: formatDescription) {
-                    print("NextLevel, could not setup audio session")
+        let task = Task {
+            guard !Task.isCancelled else { return }
+            // Setup audio with atomic check
+            let audioSetup = await session.getState().isAudioSetup
+            if !audioSetup {
+                if let settings = self.audioConfiguration.avcaptureSettingsDictionary(sampleBuffer: sampleBuffer),
+                    let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
+                    if !(await session.setupAudioIfNeeded(withSettings: settings, configuration: self.audioConfiguration, formatDescription: formatDescription)) {
+                        print("NextLevel, could not setup audio session")
+                    }
+                }
+
+                DispatchQueue.main.async {
+                    self.videoDelegate?.nextLevel(self, didSetupAudioInSession: session)
                 }
             }
 
-            DispatchQueue.main.async {
-                self.videoDelegate?.nextLevel(self, didSetupAudioInSession: session)
+            // Get state snapshot for multi-property checks
+            guard !Task.isCancelled else { return }
+            let state = await session.getState()
+            if self._recording && state.isVideoSetup && state.currentClipHasStarted && state.currentClipHasVideo {
+                self.beginRecordingNewClipIfNecessary()
+
+                guard !Task.isCancelled else { return }
+                await session.appendAudio(withSampleBuffer: sampleBuffer, completionHandler: { (success: Bool) -> Void in
+                    if success {
+                        DispatchQueue.main.async {
+                            self.videoDelegate?.nextLevel(self, didAppendAudioSampleBuffer: sampleBuffer, inSession: session)
+                        }
+                        self.checkSessionDuration()
+                    } else {
+                        DispatchQueue.main.async {
+                            self.videoDelegate?.nextLevel(self, didSkipAudioSampleBuffer: sampleBuffer, inSession: session)
+                        }
+                    }
+                })
             }
         }
-
-        if self._recording && session.isVideoSetup && session.currentClipHasStarted && session.currentClipHasVideo {
-            self.beginRecordingNewClipIfNecessary()
-
-            session.appendAudio(withSampleBuffer: sampleBuffer, completionHandler: { (success: Bool) -> Void in
-                if success {
-                    DispatchQueue.main.async {
-                        self.videoDelegate?.nextLevel(self, didAppendAudioSampleBuffer: sampleBuffer, inSession: session)
-                    }
-                    self.checkSessionDuration()
-                } else {
-                    DispatchQueue.main.async {
-                        self.videoDelegate?.nextLevel(self, didSkipAudioSampleBuffer: sampleBuffer, inSession: session)
-                    }
-                }
-            })
-        }
+        self.trackTask(task)
     }
 
     private func checkSessionDuration() {
         if let session = self._recordingSession,
             let maximumCaptureDuration = self.videoConfiguration.maximumCaptureDuration {
-            if maximumCaptureDuration.isValid && session.totalDuration >= maximumCaptureDuration {
-                self._recording = false
+            let task = Task {
+                guard !Task.isCancelled else { return }
+                let totalDuration = await session.totalDuration
+                if maximumCaptureDuration.isValid && totalDuration >= maximumCaptureDuration {
+                    self._recording = false
 
-                // already on session queue, adding to next cycle
-                self.executeClosureAsyncOnSessionQueueIfNecessary {
-                    session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
+                    await session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
                         if let clip = sessionClip {
                             DispatchQueue.main.async {
                                 self.videoDelegate?.nextLevel(self, didCompleteClip: clip, inSession: session)
+                                if #available(iOS 15.0, *) {
+                                    self.publishVideoEvent(.didCompleteClip)
+                                }
                             }
                         } else if let _ = error {
                             // TODO report error
@@ -2847,7 +2932,36 @@ extension NextLevel {
                     })
                 }
             }
+            self.trackTask(task)
         }
+    }
+
+    // MARK: - Task Management
+
+    /// Registers a task for automatic cancellation when recording stops
+    private func trackTask(_ task: Task<Void, Never>) {
+        _tasksLock.lock()
+        _activeTasks.append(task)
+        _tasksLock.unlock()
+    }
+
+    /// Cancels all active tasks (called when stopping recording)
+    private func cancelAllTasks() {
+        _tasksLock.lock()
+        let tasks = _activeTasks
+        _activeTasks.removeAll()
+        _tasksLock.unlock()
+
+        for task in tasks {
+            task.cancel()
+        }
+    }
+
+    /// Removes completed tasks from tracking
+    private func cleanupCompletedTasks() {
+        _tasksLock.lock()
+        _activeTasks.removeAll { $0.isCancelled }
+        _tasksLock.unlock()
     }
 }
 
@@ -2906,18 +3020,27 @@ extension NextLevel: AVCapturePhotoCaptureDelegate {
     public func photoOutput(_ output: AVCapturePhotoOutput, willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
         DispatchQueue.main.async {
             self.photoDelegate?.nextLevel(self, output: output, willBeginCaptureFor: resolvedSettings, photoConfiguration: self.photoConfiguration)
+            if #available(iOS 15.0, *) {
+                self.publishPhotoEvent(.willBegin)
+            }
         }
     }
 
     public func photoOutput(_ output: AVCapturePhotoOutput, willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
         DispatchQueue.main.async {
             self.photoDelegate?.nextLevel(self, output: output, willCapturePhotoFor: resolvedSettings, photoConfiguration: self.photoConfiguration)
+            if #available(iOS 15.0, *) {
+                self.publishPhotoEvent(.willCapture)
+            }
         }
     }
 
     public func photoOutput(_ output: AVCapturePhotoOutput, didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
         DispatchQueue.main.async {
             self.photoDelegate?.nextLevel(self, output: output, didCapturePhotoFor: resolvedSettings, photoConfiguration: self.photoConfiguration)
+            if #available(iOS 15.0, *) {
+                self.publishPhotoEvent(.didCapture)
+            }
         }
     }
 
@@ -2937,6 +3060,10 @@ extension NextLevel: AVCapturePhotoCaptureDelegate {
 
         DispatchQueue.main.async {
             self.photoDelegate?.nextLevel(self, didFinishProcessingPhoto: photo, photoDict: photoDict, photoConfiguration: self.photoConfiguration)
+            if #available(iOS 15.0, *) {
+                let photoData = photoDict[NextLevelPhotoFileDataKey] as? Data
+                self.publishPhotoEvent(.didFinish(photoData: photoData))
+            }
         }
 
         if let portraitEffectsMatte = photo.portraitEffectsMatte {
@@ -3089,12 +3216,18 @@ extension NextLevel {
         // TODO
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStart(self)
+            if #available(iOS 15.0, *) {
+                self.publishSessionEvent(.didStart)
+            }
         }
     }
 
     @objc internal func handleSessionDidStopRunning(_ notification: Notification) {
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStop(self)
+            if #available(iOS 15.0, *) {
+                self.publishSessionEvent(.didStop)
+            }
         }
     }
 
@@ -3123,6 +3256,9 @@ extension NextLevel {
 
             DispatchQueue.main.async {
                 self.delegate?.nextLevelSessionWasInterrupted(self)
+                if #available(iOS 15.0, *) {
+                    self.publishSessionEvent(.wasInterrupted)
+                }
             }
         }
     }
@@ -3130,6 +3266,9 @@ extension NextLevel {
     @objc public func handleSessionInterruptionEnded(_ notification: Notification) {
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionInterruptionEnded(self)
+            if #available(iOS 15.0, *) {
+                self.publishSessionEvent(.interruptionEnded)
+            }
         }
     }
 
@@ -3387,10 +3526,117 @@ extension NextLevel {
         case didFinish(photoData: Data?)
     }
 
-    // Note: The actual AsyncStream implementation would require adding private
-    // continuation storage and bridging delegate callbacks to streams.
-    // This is left as a framework extension point that can be implemented
-    // based on specific use case requirements.
+    // MARK: - AsyncStream Publishers
+
+    /// Stream of session lifecycle events
+    ///
+    /// Use this for modern reactive observation of session events without delegates.
+    ///
+    /// ## Example
+    /// ```swift
+    /// Task {
+    ///     for await event in NextLevel.shared.sessionEvents {
+    ///         switch event {
+    ///         case .didStart:
+    ///             print("Session started")
+    ///         case .didStop:
+    ///             print("Session stopped")
+    ///         default:
+    ///             break
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    public var sessionEvents: AsyncStream<SessionEvent> {
+        AsyncStream { continuation in
+            self._sessionEventContinuation = continuation
+            continuation.onTermination = { [weak self] _ in
+                self?._sessionEventContinuation = nil
+            }
+        }
+    }
+
+    /// Stream of video recording events
+    ///
+    /// Use this for modern reactive observation of video events without delegates.
+    ///
+    /// ## Example
+    /// ```swift
+    /// Task {
+    ///     for await event in NextLevel.shared.videoEvents {
+    ///         switch event {
+    ///         case .didStartClip:
+    ///             print("Clip started")
+    ///         case .didCompleteClip:
+    ///             print("Clip completed")
+    ///         default:
+    ///             break
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    public var videoEvents: AsyncStream<VideoEvent> {
+        AsyncStream { continuation in
+            self._videoEventContinuation = continuation
+            continuation.onTermination = { [weak self] _ in
+                self?._videoEventContinuation = nil
+            }
+        }
+    }
+
+    /// Stream of photo capture events
+    ///
+    /// Use this for modern reactive observation of photo events without delegates.
+    ///
+    /// ## Example
+    /// ```swift
+    /// Task {
+    ///     for await event in NextLevel.shared.photoEvents {
+    ///         switch event {
+    ///         case .willCapture:
+    ///             print("About to capture photo")
+    ///         case .didFinish(let data):
+    ///             print("Photo captured: \(data?.count ?? 0) bytes")
+    ///         default:
+    ///             break
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    public var photoEvents: AsyncStream<PhotoEvent> {
+        AsyncStream { continuation in
+            self._photoEventContinuation = continuation
+            continuation.onTermination = { [weak self] _ in
+                self?._photoEventContinuation = nil
+            }
+        }
+    }
+
+    // MARK: - Event Publishing (Internal)
+
+    /// Publishes a session event to all subscribers
+    /// Safe to call on all iOS versions - no-op before iOS 15
+    @available(iOS 15.0, *)
+    internal func publishSessionEvent(_ event: SessionEvent) {
+        // Continuation will be nil on iOS <15, making this a no-op
+        (self._sessionEventContinuation as? AsyncStream<SessionEvent>.Continuation)?.yield(event)
+    }
+
+    /// Publishes a video event to all subscribers
+    /// Safe to call on all iOS versions - no-op before iOS 15
+    @available(iOS 15.0, *)
+    internal func publishVideoEvent(_ event: VideoEvent) {
+        // Continuation will be nil on iOS <15, making this a no-op
+        (self._videoEventContinuation as? AsyncStream<VideoEvent>.Continuation)?.yield(event)
+    }
+
+    /// Publishes a photo event to all subscribers
+    /// Safe to call on all iOS versions - no-op before iOS 15
+    @available(iOS 15.0, *)
+    internal func publishPhotoEvent(_ event: PhotoEvent) {
+        // Continuation will be nil on iOS <15, making this a no-op
+        (self._photoEventContinuation as? AsyncStream<PhotoEvent>.Continuation)?.yield(event)
+    }
     //
     // Example implementation pattern:
     //
