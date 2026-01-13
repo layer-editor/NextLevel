@@ -80,6 +80,12 @@ public actor NextLevelSession {
     /// Output file extension for a session, see AVMediaFormat.h for supported extensions.
     public var fileExtension: String = "mp4"
 
+    /// When true, optimizes output files for network streaming (may increase finishWriting time for long videos).
+    /// When false, faster file writing but not optimized for network playback.
+    /// Default is true. Set to false if you only need local playback and want faster recording completion.
+    /// Issue #257: https://github.com/NextLevel/NextLevel/issues/257
+    public var shouldOptimizeForNetworkUse: Bool = true
+
     /// Unique identifier for a session.
     public var identifier: UUID {
         get {
@@ -470,7 +476,7 @@ extension NextLevelSession {
         do {
             self._writer = try AVAssetWriter(url: url, fileType: self.fileType)
             if let writer = self._writer {
-                writer.shouldOptimizeForNetworkUse = true
+                writer.shouldOptimizeForNetworkUse = self.shouldOptimizeForNetworkUse
                 writer.metadata = NextLevel.assetWriterMetadata
 
                 if let videoInput = self._videoInput {
@@ -870,7 +876,7 @@ extension NextLevelSession {
                 self.removeFile(fileUrl: exportURL)
 
                 if let exportSession = AVAssetExportSession(asset: exportAsset, presetName: preset) {
-                    exportSession.shouldOptimizeForNetworkUse = true
+                    exportSession.shouldOptimizeForNetworkUse = self.shouldOptimizeForNetworkUse
                     exportSession.outputURL = exportURL
                     exportSession.outputFileType = self.fileType
                     exportSession.exportAsynchronously {
