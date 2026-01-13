@@ -535,13 +535,13 @@ extension NextLevelSession {
         var frameDuration = minFrameDuration
         let offsetBufferTimestamp = CMTimeSubtract(timestamp, self._timeOffset)
 
+        // Fix for Issue #278: Removed cumulative offset accumulation that caused time skips
+        // Timescale should be applied to duration only, not accumulated as offset every frame
         if let timeScale = self._videoConfiguration?.timescale,
             timeScale != 1.0 {
             let scaledDuration = CMTimeMultiplyByFloat64(minFrameDuration, multiplier: timeScale)
-            if self._currentClipDuration.value > 0 {
-                self._timeOffset = CMTimeAdd(self._timeOffset, CMTimeSubtract(minFrameDuration, scaledDuration))
-            }
             frameDuration = scaledDuration
+            Logger.video.debug("Applied timescale \(timeScale) to frame duration: \(frameDuration.seconds)s")
         }
 
         if let videoInput = self._videoInput,
@@ -583,13 +583,13 @@ extension NextLevelSession {
         var frameDuration = minFrameDuration
         let offsetBufferTimestamp = CMTimeSubtract(timestamp, self._timeOffset)
 
+        // Fix for Issue #278: Removed cumulative offset accumulation that caused time skips
+        // Timescale should be applied to duration only, not accumulated as offset every frame
         if let timeScale = self._videoConfiguration?.timescale,
             timeScale != 1.0 {
             let scaledDuration = CMTimeMultiplyByFloat64(minFrameDuration, multiplier: timeScale)
-            if self._currentClipDuration.value > 0 {
-                self._timeOffset = CMTimeAdd(self._timeOffset, CMTimeSubtract(minFrameDuration, scaledDuration))
-            }
             frameDuration = scaledDuration
+            Logger.video.debug("Applied timescale \(timeScale) to frame duration: \(frameDuration.seconds)s")
         }
 
         if let videoInput = self._videoInput,

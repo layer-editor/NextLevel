@@ -484,7 +484,11 @@ public class NextLevelPhotoConfiguration: NextLevelConfiguration {
         if let options = self.options {
             return options
         } else {
-            var config: [String: Any] = [AVVideoCodecKey: self.codec]
+            var config: [String: Any] = [:]
+
+            // Fix for Issue #280: kCVPixelBufferPixelFormatTypeKey and AVVideoCodecKey are mutually exclusive
+            // When generating preview/thumbnail, use pixel format type key
+            // Otherwise, use codec key for final photo output
             if self.generateThumbnail {
                 let settings = AVCapturePhotoSettings()
                 // iOS 11 GM fix
@@ -492,9 +496,15 @@ public class NextLevelPhotoConfiguration: NextLevelConfiguration {
                 if settings.__availablePreviewPhotoPixelFormatTypes.count > 0 {
                     if let formatType = settings.__availablePreviewPhotoPixelFormatTypes.first {
                         config[kCVPixelBufferPixelFormatTypeKey as String] = formatType
+                        Logger.photo.debug("Photo configuration using preview pixel format: \(formatType)")
                     }
                 }
+            } else {
+                // Only set codec when not generating preview/thumbnail
+                config[AVVideoCodecKey] = self.codec
+                Logger.photo.debug("Photo configuration using codec: \(self.codec.rawValue)")
             }
+
             return config
         }
     }

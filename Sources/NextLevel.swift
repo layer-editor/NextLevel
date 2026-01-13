@@ -477,6 +477,7 @@ public class NextLevel: NSObject {
     internal var _recording: Bool = false
     internal var _recordingSession: NextLevelSession?
     internal var _lastVideoFrameTimeInterval: TimeInterval = 0
+    internal var _pausedDueToInterruption: Bool = false
 
     // Task management for proper cancellation
     internal var _activeTasks: [Task<Void, Never>] = []
@@ -3250,8 +3251,11 @@ extension NextLevel {
 
     @objc public func handleSessionWasInterrupted(_ notification: Notification) {
         DispatchQueue.main.async {
+            // Fix for Issue #281: Properly pause recording during interruption to prevent audio loss
             if self._recording {
-                self.delegate?.nextLevelSessionDidStop(self)
+                Logger.session.info("Session interrupted while recording - pausing to preserve audio/video sync")
+                self._pausedDueToInterruption = true
+                self.pause()
             }
 
             DispatchQueue.main.async {
@@ -3268,6 +3272,20 @@ extension NextLevel {
             self.delegate?.nextLevelSessionInterruptionEnded(self)
             if #available(iOS 15.0, *) {
                 self.publishSessionEvent(.interruptionEnded)
+            }
+
+            // Fix for Issue #281: Resume recording after interruption if it was paused
+            if self._pausedDueToInterruption {
+                Logger.session.info("Interruption ended - resuming recording")
+                self._pausedDueToInterruption = false
+
+                // Small delay to allow audio session to stabilize
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    // Verify session is still running before resuming
+                    if self.isRunning && !self._recording {
+                        self.record()
+                    }
+                }
             }
         }
     }
