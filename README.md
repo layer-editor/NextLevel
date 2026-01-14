@@ -1,8 +1,10 @@
 <p><img src="https://raw.github.com/NextLevel/NextLevel/master/NextLevel%402x.png" alt="Next Level" style="max-width:100%;"></p>
 
-`NextLevel` is a [Swift](https://developer.apple.com/swift/) camera system designed for easy integration, customized media capture, and image streaming in iOS. Integration can optionally leverage `AVFoundation` or `ARKit`.
+## NextLevel 📷
 
-[![Build Status](https://travis-ci.org/NextLevel/NextLevel.svg?branch=master)](https://travis-ci.org/NextLevel/NextLevel) [![Pod Version](https://img.shields.io/cocoapods/v/NextLevel.svg?style=flat)](http://cocoadocs.org/docsets/NextLevel/) [![Swift Version](https://img.shields.io/badge/language-swift%206.0-brightgreen.svg)](https://developer.apple.com/swift) [![GitHub license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](https://github.com/NextLevel/NextLevel/blob/master/LICENSE)
+`NextLevel` is a Swift camera system designed for easy integration, customized media capture, and image streaming in iOS.
+
+[![Swift Version](https://img.shields.io/badge/language-swift%206.0-brightgreen.svg)](https://developer.apple.com/swift) [![Platform](https://img.shields.io/badge/platform-iOS%2015.0%2B-blue.svg)](https://developer.apple.com/ios/) [![SPM Compatible](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg)](https://swift.org/package-manager/) [![Pod Version](https://img.shields.io/cocoapods/v/NextLevel.svg?style=flat)](http://cocoadocs.org/docsets/NextLevel/) [![GitHub license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](https://github.com/NextLevel/NextLevel/blob/master/LICENSE)
 
 |  | Features |
 |:---------:|:---------------------------------------------------------------|
@@ -28,58 +30,54 @@
 | &#9889; | async/await and modern concurrency support |
 | &#128214; | structured logging with OSLog |
 
-## Swift 6 & iOS 15+
+The library provides powerful camera controls and features for capturing photos and videos, including multi-clip "Vine-like" recording, custom buffer processing, ARKit integration, and extensive device control – all with a simple, intuitive API.
 
-NextLevel now requires **Swift 6.0+** and **iOS 15.0+**. The framework has been modernized with:
+### ✨ What's New in Swift 6
 
-- ✅ Swift 6 strict concurrency checking
-- ✅ Sendable conformance for thread-safe types
-- ✅ Async/await API wrappers
-- ✅ AsyncStream event types
-- ✅ OSLog structured logging
-- ✅ Enhanced error handling with LocalizedError
+- **🚀 Modern Async/Await API** - Native Swift concurrency support with `async/await` and `AsyncStream` events
+- **🔒 Swift 6 Strict Concurrency** - Full thread-safety with Sendable conformance and actor isolation
+- **🛡️ Critical Bug Fixes** - Fixed AudioChannelLayout crash (#286, #271), photo capture crash (#280), audio interruption handling (#281), and video timing issues (#278)
+- **📝 Enhanced Error Messages** - Contextual error descriptions with LocalizedError and recovery suggestions
+- **⚡ Better Performance** - Proper state management and memory handling for long recordings
+- **📐 Multi-Clip Recording Improvements** - Fixed timestamp offset bugs for seamless clip merging
+- **🎯 Configurable Network Optimization** - Control shouldOptimizeForNetworkUse for faster local recording (#257)
+- **📱 iOS 15+ AsyncStream Events** - Modern reactive event system for camera state changes
+- **🔙 Backwards Compatible** - Legacy delegate-based API still works
 
-### Modern Async/Await API
+### Requirements
 
-```swift
-// Merge clips with async/await
-do {
-    let url = try await session.mergeClips(usingPreset: AVAssetExportPresetHighestQuality)
-    print("Video saved to: \(url)")
-} catch {
-    print("Merge failed: \(error.localizedDescription)")
-}
-```
+- **iOS 15.0+** for async/await APIs and modern concurrency features
+- **Swift 6.0**
+- **Xcode 16.0+**
 
-### Bug Fixes
+### Related Projects
 
-- ✅ Fixed critical AudioChannelLayout crash ([#286](https://github.com/NextLevel/NextLevel/issues/286), [#271](https://github.com/NextLevel/NextLevel/issues/271))
-
-Need a different version of Swift?
-* `6.0+` - Latest release (main branch)
-* `5.0` - Target the `swift5` branch
-* `4.2` - Target the `swift4.2` branch
+- Looking for a video exporter? Check out [NextLevelSessionExporter](https://github.com/NextLevel/NextLevelSessionExporter).
+- Looking for a video player? Check out [Player](https://github.com/piemonte/player)
 
 ## Quick Start
 
-```ruby
+### Swift Package Manager (Recommended)
 
-# CocoaPods
-pod "NextLevel", "~> 0.16.3"
+Add the following to your `Package.swift`:
 
-# Carthage
-github "nextlevel/NextLevel" ~> 0.16.3
-
-# Swift PM
-let package = Package(
-    dependencies: [
-        .Package(url: "https://github.com/nextlevel/NextLevel", majorVersion: 0)
-    ]
-)
-
+```swift
+dependencies: [
+    .package(url: "https://github.com/NextLevel/NextLevel", from: "0.19.0")
+]
 ```
 
-Alternatively, drop the NextLevel [source files](https://github.com/NextLevel/NextLevel/tree/master/Sources) or project file into your Xcode project.
+Or add it directly in Xcode: **File → Add Package Dependencies...**
+
+### CocoaPods
+
+```ruby
+pod "NextLevel", "~> 0.19.0"
+```
+
+### Manual Integration
+
+Alternatively, drop the [source files](https://github.com/NextLevel/NextLevel/tree/master/Sources) into your Xcode project.
 
 ## Important Configuration Note for ARKit and True Depth
 
@@ -100,9 +98,11 @@ If you use Cocoapods, you can include `-D USE_ARKIT` or `-D USE_TRUE_DEPTH` with
   end
 ```
 
-## Overview
+## Examples
 
-Before starting, ensure that permission keys have been added to your app's `Info.plist`.
+### Permissions
+
+Before starting, ensure that permission keys have been added to your app's `Info.plist`:
 
 ```xml
 <key>NSCameraUsageDescription</key>
@@ -111,15 +111,15 @@ Before starting, ensure that permission keys have been added to your app's `Info
     <string>Allowing access to the microphone lets you record audio.</string>
 ```
 
-### Recording Video Clips
+### Basic Video Recording
 
-Import the library.
+Import the library:
 
 ```swift
 import NextLevel
 ```
 
-Setup the camera preview.
+Setup the camera preview:
 
 ```swift
 let screenBounds = UIScreen.main.bounds
@@ -133,78 +133,256 @@ if let previewView = self.previewView {
 }
 ```
 
-Configure the capture session.
+Configure the capture session:
 
 ```swift
 override func viewDidLoad() {
+    super.viewDidLoad()
+
+    // Set delegates
     NextLevel.shared.delegate = self
     NextLevel.shared.deviceDelegate = self
     NextLevel.shared.videoDelegate = self
     NextLevel.shared.photoDelegate = self
 
-    // modify .videoConfiguration, .audioConfiguration, .photoConfiguration properties
-    // Compression, resolution, and maximum recording time options are available
-    NextLevel.shared.videoConfiguration.maximumCaptureDuration = CMTimeMakeWithSeconds(5, 600)
-    NextLevel.shared.audioConfiguration.bitRate = 44000
- }
+    // Configure video settings
+    NextLevel.shared.videoConfiguration.bitRate = 6_000_000  // 6 Mbps
+    NextLevel.shared.videoConfiguration.preset = .hd1920x1080
+    NextLevel.shared.videoConfiguration.maximumCaptureDuration = CMTime(seconds: 10, preferredTimescale: 600)
+
+    // Configure audio settings
+    NextLevel.shared.audioConfiguration.bitRate = 128_000  // 128 kbps
+}
 ```
 
-Start/stop the session when appropriate. These methods create a new "session" instance for 'NextLevel.shared.session' when called.
+Start/stop the session:
 
 ```swift
 override func viewWillAppear(_ animated: Bool) {
-    super.viewWillAppear(animated)     
+    super.viewWillAppear(animated)
     NextLevel.shared.start()
-    // …
 }
-```
 
-```swift
 override func viewWillDisappear(_ animated: Bool) {
-    super.viewWillDisappear(animated)        
+    super.viewWillDisappear(animated)
     NextLevel.shared.stop()
-    // …
 }
 ```
 
-Video record/pause.
+Record and pause:
 
 ```swift
-// record
+// Start recording
 NextLevel.shared.record()
 
-// pause
+// Pause recording (creates a clip)
 NextLevel.shared.pause()
+
+// Resume recording (starts a new clip)
+NextLevel.shared.record()
 ```
 
-### Editing Recorded Clips
+### Modern Async/Await API (iOS 15+)
 
-Editing and finalizing the recorded session.
+The modern API provides clean async/await support for session operations:
+
 ```swift
+// Merge clips with async/await
+do {
+    if let session = NextLevel.shared.session {
+        let url = try await session.mergeClips(usingPreset: AVAssetExportPresetHighestQuality)
+        print("Video saved to: \(url)")
 
-if let session = NextLevel.shared.session {
-
-    //..
-
-    // undo
-    session.removeLastClip()
-
-    // various editing operations can be done using the NextLevelSession methods
-
-    // export
-    session.mergeClips(usingPreset: AVAssetExportPresetHighestQuality, completionHandler: { (url: URL?, error: Error?) in
-        if let _ = url {
-            //
-        } else if let _ = error {
-            //
+        // Save to photo library
+        try await PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
         }
-     })
-
-    //..
-
+    }
+} catch {
+    print("Merge failed: \(error.localizedDescription)")
 }
 ```
-Videos can also be processed using the [NextLevelSessionExporter](https://github.com/NextLevel/NextLevelSessionExporter), a media transcoding library in Swift.
+
+### AsyncStream Events (iOS 15+)
+
+Subscribe to camera events using AsyncStream for reactive programming:
+
+```swift
+Task {
+    for await event in NextLevel.shared.sessionEvents {
+        switch event {
+        case .didStart:
+            print("Camera session started")
+        case .didStop:
+            print("Camera session stopped")
+        case .sessionDidStart:
+            print("Recording session started")
+        case .sessionDidStop:
+            print("Recording session stopped")
+        case .wasInterrupted:
+            print("Session interrupted (e.g., phone call)")
+        case .interruptionEnded:
+            print("Interruption ended")
+        }
+    }
+}
+```
+
+### Multi-Clip Recording ("Vine-like")
+
+NextLevel makes it easy to record multiple clips and merge them into a single video:
+
+```swift
+// Record first clip
+NextLevel.shared.record()
+// ... wait ...
+NextLevel.shared.pause()  // Creates first clip
+
+// Record second clip
+NextLevel.shared.record()
+// ... wait ...
+NextLevel.shared.pause()  // Creates second clip
+
+// Access all clips
+if let session = NextLevel.shared.session {
+    print("Total clips: \(session.clips.count)")
+    print("Total duration: \(session.totalDuration.seconds)s")
+
+    // Remove last clip (undo)
+    session.removeLastClip()
+
+    // Remove specific clip
+    if let firstClip = session.clips.first {
+        session.remove(clip: firstClip)
+    }
+
+    // Remove all clips
+    session.removeAllClips()
+
+    // Merge all clips into single video
+    session.mergeClips(usingPreset: AVAssetExportPresetHighestQuality) { url, error in
+        if let outputURL = url {
+            print("Merged video: \(outputURL)")
+        } else if let error = error {
+            print("Merge failed: \(error.localizedDescription)")
+        }
+    }
+}
+```
+
+### Photo Capture
+
+Capture high-quality photos with extensive configuration options:
+
+```swift
+// Configure photo settings
+NextLevel.shared.photoConfiguration.codec = .hevc  // HEVC for better compression
+NextLevel.shared.photoConfiguration.isHighResolutionEnabled = true
+NextLevel.shared.photoConfiguration.flashMode = .auto
+
+// Capture photo
+NextLevel.shared.capturePhoto()
+
+// Handle result in delegate
+extension CameraViewController: NextLevelPhotoDelegate {
+    func nextLevel(_ nextLevel: NextLevel, didCompletePhotoCaptureFromVideoFrame: Bool) {
+        print("Photo capture completed")
+    }
+
+    func nextLevel(_ nextLevel: NextLevel, didFinishProcessingPhoto photo: AVCapturePhoto, photoDict: [String: Any], photoConfiguration: NextLevelPhotoConfiguration) {
+        // Get JPEG data
+        if let jpegData = photoDict[NextLevelPhotoJPEGKey] as? Data {
+            // Save photo
+            if let image = UIImage(data: jpegData) {
+                UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+            }
+        }
+
+        // Get HEVC data (if configured)
+        if let hevcData = photoDict[NextLevelPhotoHEVCKey] as? Data {
+            // Process HEVC photo
+        }
+    }
+}
+```
+
+### Camera Control
+
+NextLevel provides comprehensive camera control:
+
+```swift
+// Focus
+try? NextLevel.shared.focusAtAdjustedPoint(CGPoint(x: 0.5, y: 0.5))
+NextLevel.shared.focusMode = .continuousAutoFocus
+
+// Exposure
+try? NextLevel.shared.exposeAtAdjustedPoint(CGPoint(x: 0.5, y: 0.5))
+NextLevel.shared.exposureMode = .continuousAutoExposure
+
+// Zoom
+NextLevel.shared.videoZoomFactor = 2.0
+
+// Flash
+NextLevel.shared.flashMode = .on
+
+// Torch
+NextLevel.shared.torchMode = .on
+
+// Device position (front/back camera)
+NextLevel.shared.devicePosition = .front
+
+// Orientation
+NextLevel.shared.deviceOrientation = .portrait
+
+// Frame rate
+NextLevel.shared.frameRate = 60  // 60 fps for slow motion
+
+// Mirroring
+NextLevel.shared.isMirroringEnabled = true
+
+// Stabilization
+NextLevel.shared.videoStabilizationMode = .cinematic
+```
+
+### Legacy Delegate-Based API
+
+For compatibility with older iOS versions or existing codebases:
+
+```swift
+extension CameraViewController: NextLevelDelegate {
+    func nextLevelSessionWillStart(_ nextLevel: NextLevel) {
+        print("Session will start")
+    }
+
+    func nextLevelSessionDidStart(_ nextLevel: NextLevel) {
+        print("Session started")
+    }
+
+    func nextLevelSessionDidStop(_ nextLevel: NextLevel) {
+        print("Session stopped")
+    }
+
+    func nextLevelSessionWasInterrupted(_ nextLevel: NextLevel) {
+        print("Session interrupted")
+    }
+
+    func nextLevelSessionInterruptionEnded(_ nextLevel: NextLevel) {
+        print("Interruption ended")
+    }
+}
+
+extension CameraViewController: NextLevelVideoDelegate {
+    func nextLevel(_ nextLevel: NextLevel, didUpdateVideoConfiguration videoConfiguration: NextLevelVideoConfiguration) {
+        print("Video configuration updated")
+    }
+
+    func nextLevel(_ nextLevel: NextLevel, didUpdateVideoZoomFactor videoZoomFactor: Float) {
+        print("Zoom: \(videoZoomFactor)x")
+    }
+}
+```
+
+Videos can also be processed using [NextLevelSessionExporter](https://github.com/NextLevel/NextLevelSessionExporter), a powerful media transcoding library in Swift.
 
 ## Custom Buffer Rendering
 
