@@ -431,6 +431,284 @@ NextLevel will check this property when writing buffers to a destination file. T
 nextLevel.videoCustomContextImageBuffer = modifiedFrame
 ```
 
+## Migration Guide
+
+### Migrating to Swift 6 (v0.19.0)
+
+The 0.19.0 release introduces Swift 6 with modern async/await APIs while maintaining full backward compatibility. Here's how to migrate:
+
+#### Breaking Changes
+
+- **Minimum iOS 15.0** (was iOS 14.0)
+- **Swift 6.0 required** (was Swift 5.x)
+- **Xcode 16.0+ required**
+
+#### Non-Breaking Changes
+
+All existing delegate-based APIs continue to work. You can adopt new features incrementally:
+
+**Before (0.x):**
+```swift
+// Legacy completion handler
+session.mergeClips(usingPreset: AVAssetExportPresetHighestQuality) { url, error in
+    if let url = url {
+        print("Merged: \(url)")
+    } else if let error = error {
+        print("Error: \(error)")
+    }
+}
+```
+
+**After (0.19.0):**
+```swift
+// Modern async/await
+do {
+    let url = try await session.mergeClips(usingPreset: AVAssetExportPresetHighestQuality)
+    print("Merged: \(url)")
+} catch {
+    print("Error: \(error.localizedDescription)")
+}
+```
+
+#### Adopting AsyncStream Events (Optional)
+
+**Before:**
+```swift
+extension CameraViewController: NextLevelDelegate {
+    func nextLevelSessionDidStart(_ nextLevel: NextLevel) {
+        print("Session started")
+    }
+
+    func nextLevelSessionWasInterrupted(_ nextLevel: NextLevel) {
+        print("Session interrupted")
+    }
+}
+```
+
+**After (iOS 15+):**
+```swift
+Task {
+    for await event in NextLevel.shared.sessionEvents {
+        switch event {
+        case .didStart:
+            print("Session started")
+        case .wasInterrupted:
+            print("Session interrupted")
+        default:
+            break
+        }
+    }
+}
+```
+
+#### Bug Fixes You Get Automatically
+
+When you update to 0.19.0, these critical bugs are automatically fixed:
+
+1. **AudioChannelLayout crash** (#286, #271) - No longer crashes when audio channel layout doesn't match channel count
+2. **Photo capture crash** (#280) - Fixed when `generateThumbnail = true`
+3. **Missing audio after interruption** (#281) - Audio now properly resumes after phone calls
+4. **Video time skips** (#278) - Fixed timestamp offset accumulation bug
+5. **Network optimization** (#257) - Now configurable via `shouldOptimizeForNetworkUse`
+
+**No code changes required** - just update your dependency version!
+
+#### Updated Error Handling
+
+Errors now provide more context:
+
+```swift
+do {
+    try NextLevel.shared.focusAtAdjustedPoint(point)
+} catch let error as LocalizedError {
+    print(error.localizedDescription)     // User-friendly message
+    print(error.recoverySuggestion ?? "")  // How to fix it
+}
+```
+
+### Migrating from Older Versions
+
+**Need Swift 5?** Target the `swift5` branch:
+```ruby
+pod "NextLevel", :git => 'https://github.com/NextLevel/NextLevel.git', :branch => 'swift5'
+```
+
+**Need Swift 4.2?** Target the `swift4.2` branch:
+```ruby
+pod "NextLevel", :git => 'https://github.com/NextLevel/NextLevel.git', :branch => 'swift4.2'
+```
+
+## Troubleshooting
+
+### AudioChannelLayout Crash (Fixed in 0.19.0)
+
+**Problem:** App crashes with "AudioChannelLayout channel count does not match AVNumberOfChannelsKey channel count"
+
+**Solution:** Update to NextLevel 0.19.0 or later. This issue has been fixed.
+
+**Root Cause:** Audio channel layout validation now ensures the layout matches the declared channel count before configuring AVAssetWriterInput.
+
+### Photo Capture Crash with generateThumbnail (Fixed in 0.19.0)
+
+**Problem:** Setting `generateThumbnail = true` causes app crash
+
+**Solution:** Update to NextLevel 0.19.0 or later. The issue has been fixed.
+
+**Root Cause:** `kCVPixelBufferPixelFormatTypeKey` and `AVVideoCodecKey` are mutually exclusive in AVFoundation. The fix ensures only the appropriate key is set based on thumbnail configuration.
+
+### Missing Audio After Phone Call (Fixed in 0.19.0)
+
+**Problem:** Video recordings have no audio after receiving a phone call or other interruption
+
+**Solution:** Update to NextLevel 0.19.0 or later. The library now properly pauses and resumes recording during interruptions.
+
+**Root Cause:** Audio session interruptions weren't properly handled, causing audio track initialization to fail after resuming.
+
+### Video Has Time Skips or Jumps (Fixed in 0.19.0)
+
+**Problem:** Video playback shows unexpected time skips or jumps between clips
+
+**Solution:** Update to NextLevel 0.19.0 or later. The timestamp offset calculation has been fixed.
+
+**Root Cause:** Cumulative timestamp offset was being incorrectly accumulated every frame instead of only adjusting clip boundaries.
+
+### Camera Session Won't Start
+
+**Problem:** Camera preview is black or session doesn't start
+
+**Solutions:**
+1. Check permissions in Info.plist:
+```xml
+<key>NSCameraUsageDescription</key>
+<string>Allowing access to the camera lets you take photos and videos.</string>
+<key>NSMicrophoneUsageDescription</key>
+<string>Allowing access to the microphone lets you record audio.</string>
+```
+
+2. Verify you're calling `start()` on the main thread:
+```swift
+DispatchQueue.main.async {
+    NextLevel.shared.start()
+}
+```
+
+3. Check authorization status:
+```swift
+let authStatus = AVCaptureDevice.authorizationStatus(for: .video)
+if authStatus == .authorized {
+    NextLevel.shared.start()
+} else {
+    AVCaptureDevice.requestAccess(for: .video) { granted in
+        if granted {
+            DispatchQueue.main.async {
+                NextLevel.shared.start()
+            }
+        }
+    }
+}
+```
+
+### Recording Stops Unexpectedly
+
+**Problem:** Recording stops on its own without calling `pause()`
+
+**Possible Causes:**
+1. **Maximum duration reached** - Check `videoConfiguration.maximumCaptureDuration`
+2. **Disk space full** - Monitor available storage
+3. **Memory pressure** - Lower resolution or bitrate for long recordings
+4. **Interruption** - Phone call, Siri, or other system interruption
+
+**Solutions:**
+```swift
+// Increase max duration
+NextLevel.shared.videoConfiguration.maximumCaptureDuration = CMTime.positiveInfinity
+
+// Monitor session state
+extension YourViewController: NextLevelDelegate {
+    func nextLevelCaptureDurationDidChange(_ nextLevel: NextLevel) {
+        if let session = nextLevel.session {
+            print("Duration: \(session.totalDuration.seconds)s")
+        }
+    }
+}
+```
+
+### Low Frame Rate or Choppy Video
+
+**Solutions:**
+1. Lower the resolution:
+```swift
+NextLevel.shared.videoConfiguration.preset = .hd1280x720  // Instead of 1920x1080
+```
+
+2. Reduce bitrate:
+```swift
+NextLevel.shared.videoConfiguration.bitRate = 3_000_000  // 3 Mbps instead of 6 Mbps
+```
+
+3. Disable custom buffer processing if not needed:
+```swift
+NextLevel.shared.isVideoCustomContextRenderingEnabled = false
+```
+
+4. Test on a physical device (simulators have different performance characteristics)
+
+### Memory Issues During Long Recordings
+
+**Solutions:**
+1. Use HEVC codec for better compression:
+```swift
+NextLevel.shared.videoConfiguration.codec = .hevc
+```
+
+2. Enable network optimization for faster writing (default):
+```swift
+if let session = NextLevel.shared.session {
+    session.shouldOptimizeForNetworkUse = true
+}
+```
+
+3. Remove clips you no longer need:
+```swift
+session.removeLastClip()
+session.removeAllClips(removeFiles: true)  // Also delete files from disk
+```
+
+### ARKit Integration Issues
+
+**Problem:** App rejected by App Store for linking ARKit without using it
+
+**Solution:** Only include ARKit compiler flags when you're actually using ARKit features:
+
+```ruby
+# In Podfile - only add if using ARKit
+installer.pods_project.targets.each do |target|
+    if target.name == 'NextLevel'
+        target.build_configurations.each do |config|
+            config.build_settings['OTHER_SWIFT_FLAGS'] = ['$(inherited)', '-DUSE_ARKIT']
+        end
+    end
+end
+```
+
+Don't add `-DUSE_ARKIT` or `-DUSE_TRUE_DEPTH` flags unless you're actually using those features.
+
+### Build Errors After Upgrading to Swift 6
+
+**Problem:** Concurrency warnings or errors after upgrading
+
+**Solutions:**
+1. Clean build folder: **Product → Clean Build Folder**
+2. Delete DerivedData: `rm -rf ~/Library/Developer/Xcode/DerivedData`
+3. Update all dependencies to Swift 6 compatible versions
+4. Enable strict concurrency checking in your project if needed
+
+### Getting Help
+
+- **Issues**: Open an [issue](https://github.com/NextLevel/NextLevel/issues) with device model, iOS version, and NextLevel version
+- **Questions**: Use [Stack Overflow](http://stackoverflow.com/questions/tagged/nextlevel) with the tag `nextlevel`
+- **Discussions**: Check [GitHub Discussions](https://github.com/NextLevel/NextLevel/discussions) for community help
+
 ## About
 
 NextLevel was initally a weekend project that has now grown into a open community of camera platform enthusists. The software provides foundational components for managing media recording, camera interface customization, gestural interaction customization, and image streaming on iOS. The same capabilities can also be found in apps such as [Snapchat](http://snapchat.com), [Instagram](http://instagram.com), and [Vine](http://vine.co).
@@ -447,28 +725,13 @@ If you are trying to capture frames from SceneKit for ARKit recording, check out
 
 You can find [the docs here](https://nextlevel.github.io/NextLevel). Documentation is generated with [jazzy](https://github.com/realm/jazzy) and hosted on [GitHub-Pages](https://pages.github.com).
 
-### Stickers
-
-If you found this project to be helpful, check out the [Next Level stickers](https://www.stickermule.com/en/user/1070732101/stickers).
-
-### Project
+## Community
 
 NextLevel is a community – contributions and discussions are welcome!
 
-- Feature idea? Open an [issue](https://github.com/nextlevel/NextLevel/issues).
-- Found a bug? Open an [issue](https://github.com/nextlevel/NextLevel/issues).
-- Need help? Use [Stack Overflow](http://stackoverflow.com/questions/tagged/nextlevel) with the tag ’nextlevel’.
-- Questions? Use [Stack Overflow](http://stackoverflow.com/questions/tagged/nextlevel) with the tag 'nextlevel'.
-- Want to contribute? Submit a pull request.
-
-### Related Projects
-
-- [Player (Swift)](https://github.com/piemonte/player), video player in Swift
-- [PBJVideoPlayer (obj-c)](https://github.com/piemonte/PBJVideoPlayer), video player in obj-c
-- [NextLevelSessionExporter](https://github.com/NextLevel/NextLevelSessionExporter), media transcoding in Swift
-- [GPUImage3](https://github.com/BradLarson/GPUImage3), image processing library
-- [SCRecorder](https://github.com/rFlex/SCRecorder), obj-c capture library
-- [PBJVision](https://github.com/piemonte/PBJVision), obj-c capture library
+- Found a bug? Open an [issue](https://github.com/NextLevel/NextLevel/issues).
+- Feature idea? Open an [issue](https://github.com/NextLevel/NextLevel/issues).
+- Want to contribute? Submit a [pull request](https://github.com/NextLevel/NextLevel/pulls).
 
 ## Resources
 
