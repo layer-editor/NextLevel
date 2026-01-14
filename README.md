@@ -344,6 +344,45 @@ NextLevel.shared.isMirroringEnabled = true
 NextLevel.shared.videoStabilizationMode = .cinematic
 ```
 
+### Bluetooth Audio Support
+
+To use Bluetooth headsets or external microphones, configure the audio session before starting NextLevel:
+
+```swift
+override func viewDidLoad() {
+    super.viewDidLoad()
+
+    // Disable automatic audio session configuration
+    NextLevel.shared.automaticallyConfiguresApplicationAudioSession = false
+
+    // Configure audio session for Bluetooth support
+    let audioSession = AVAudioSession.sharedInstance()
+    do {
+        try audioSession.setCategory(
+            .playAndRecord,
+            mode: .videoRecording,
+            options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker]
+        )
+        try audioSession.setActive(true)
+    } catch {
+        print("Failed to configure audio session: \(error)")
+    }
+
+    // Now configure NextLevel
+    NextLevel.shared.delegate = self
+    NextLevel.shared.videoDelegate = self
+    // ... rest of configuration
+}
+```
+
+**Audio Session Options:**
+- `.allowBluetooth` - Enable Bluetooth HFP (hands-free profile) for voice
+- `.allowBluetoothA2DP` - Enable Bluetooth A2DP for high-quality audio
+- `.defaultToSpeaker` - Use speaker when no Bluetooth device is connected
+- `.mixWithOthers` - Allow mixing with other audio (e.g., music apps)
+
+**Note:** Choose the options that match your app's requirements. For example, video recording typically uses `.videoRecording` mode with `.allowBluetoothA2DP` for better audio quality.
+
 ### Legacy Delegate-Based API
 
 For compatibility with older iOS versions or existing codebases:
