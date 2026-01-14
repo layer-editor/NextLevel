@@ -280,6 +280,15 @@ NextLevel.shared.photoConfiguration.codec = .hevc  // HEVC for better compressio
 NextLevel.shared.photoConfiguration.isHighResolutionEnabled = true
 NextLevel.shared.photoConfiguration.flashMode = .auto
 
+// Set photo resolution/aspect ratio
+// By default photos use .high preset (16:9)
+// Available presets:
+NextLevel.shared.photoConfiguration.preset = .photo          // 4:3 aspect ratio (default camera)
+// NextLevel.shared.photoConfiguration.preset = .high        // 16:9 aspect ratio
+// NextLevel.shared.photoConfiguration.preset = .hd1280x720  // 720p
+// NextLevel.shared.photoConfiguration.preset = .hd1920x1080 // 1080p
+// NextLevel.shared.photoConfiguration.preset = .hd4K3840x2160 // 4K
+
 // Capture photo
 NextLevel.shared.capturePhoto()
 
@@ -305,6 +314,14 @@ extension CameraViewController: NextLevelPhotoDelegate {
     }
 }
 ```
+
+**Photo Configuration Options:**
+- **Codec**: `.jpeg`, `.hevc` - Choose compression format
+- **Preset**: `.photo` (4:3), `.high` (16:9), `.hd1920x1080`, `.hd4K3840x2160` - Controls resolution and aspect ratio
+- **High Resolution**: Enable `isHighResolutionEnabled` for maximum quality
+- **Flash Mode**: `.on`, `.off`, `.auto`
+- **Portrait Effects Matte**: Enable `isPortraitEffectsMatteEnabled` for depth effects
+- **Quality Prioritization**: `.speed`, `.balanced`, `.quality` - Balance between capture speed and quality
 
 ### Camera Control
 
