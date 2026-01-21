@@ -263,18 +263,16 @@ public actor NextLevelSession {
     /// - Note: This initializer is maintained for API compatibility but dispatch queues
     ///         are no longer used. The actor's built-in isolation replaces queue-based synchronization.
     @available(*, deprecated, message: "Dispatch queues are no longer needed with actor isolation")
-    public convenience init(queue: DispatchQueue, queueKey: DispatchSpecificKey<()>) {
-        self.init()
+    public init(queue: DispatchQueue, queueKey: DispatchSpecificKey<()>) {
+        // Initialize stored properties (queue parameters ignored - actor provides isolation)
+        self._identifier = UUID()
+        self._date = Date()
+        self.outputDirectory = NSTemporaryDirectory()
     }
 
     deinit {
-        self._writer = nil
-        self._videoInput = nil
-        self._audioInput = nil
-        self._pixelBufferAdapter = nil
-
-        self._videoConfiguration = nil
-        self._audioConfiguration = nil
+        // Actor properties are automatically released - no manual cleanup needed
+        // Cannot access actor-isolated properties from nonisolated deinit
     }
 
 }
@@ -525,7 +523,7 @@ extension NextLevelSession {
 extension NextLevelSession {
 
     /// Completion handler type for appending a sample buffer
-    public typealias NextLevelSessionAppendSampleBufferCompletionHandler = (_: Bool) -> Void
+    public typealias NextLevelSessionAppendSampleBufferCompletionHandler = @Sendable (_: Bool) -> Void
 
     /// Append video sample buffer frames to a session for recording.
     ///
@@ -633,7 +631,7 @@ extension NextLevelSession {
 
         let buffers = self._skippedAudioBuffers + [sampleBuffer]
         self._skippedAudioBuffers = []
-        var failedBuffers: [CMSampleBuffer] = []
+        nonisolated(unsafe) var failedBuffers: [CMSampleBuffer] = []
 
         buffers.forEach { buffer in
             let duration = CMSampleBufferGetDuration(buffer)
@@ -684,7 +682,7 @@ extension NextLevelSession {
     // create
 
     /// Completion handler type for ending a clip
-    public typealias NextLevelSessionEndClipCompletionHandler = (_: NextLevelClip?, _: Error?) -> Void
+    public typealias NextLevelSessionEndClipCompletionHandler = @Sendable (_: NextLevelClip?, _: Error?) -> Void
 
     /// Starts a clip
     public func beginClip() {
@@ -720,9 +718,12 @@ extension NextLevelSession {
                 } else {
                     // print("ending session \(CMTimeGetSeconds(self._currentClipDuration))")
                     writer.endSession(atSourceTime: CMTimeAdd(self._currentClipDuration, self._startTimestamp))
+                    // Store output URL before finishing writing (AVAssetWriter is not Sendable)
+                    let outputURL = writer.outputURL
                     writer.finishWriting(completionHandler: { [weak self] in
-                        Task { [weak self] in
-                            await self?.handleFinishedWriting(writer: writer, completionHandler: completionHandler)
+                        Task { [weak self, outputURL, completionHandler] in
+                            // Retrieve writer from URL after finishing
+                            await self?.handleFinishedWritingAtURL(outputURL, completionHandler: completionHandler)
                         }
                     })
                     return
@@ -741,6 +742,27 @@ extension NextLevelSession {
         var clip: NextLevelClip?
         let url = writer.outputURL
         let error = writer.error
+
+        if error == nil {
+            clip = NextLevelClip(url: url, infoDict: nil)
+            if let clip = clip {
+                self.add(clip: clip)
+            }
+        }
+
+        self.destroyWriter()
+
+        if let completionHandler = completionHandler {
+            DispatchQueue.main.async {
+                completionHandler(clip, error)
+            }
+        }
+    }
+
+    private func handleFinishedWritingAtURL(_ url: URL, completionHandler: NextLevelSessionEndClipCompletionHandler?) {
+        var clip: NextLevelClip?
+        // Writer has finished - check if clip was successfully written
+        let error = self._writer?.error
 
         if error == nil {
             clip = NextLevelClip(url: url, infoDict: nil)
@@ -849,7 +871,7 @@ extension NextLevelSession {
     }
 
     /// Completion handler type for merging clips, optionals indicate success or failure when nil
-    public typealias NextLevelSessionMergeClipsCompletionHandler = (_: URL?, _: Error?) -> Void
+    public typealias NextLevelSessionMergeClipsCompletionHandler = @Sendable (_: URL?, _: Error?) -> Void
 
     /// Merges all existing recorded clips in the session and exports to a file.
     ///

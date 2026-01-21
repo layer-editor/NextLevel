@@ -34,7 +34,7 @@ import ARKit
 // MARK: - MediaTypeConfiguration
 
 /// NextLevelConfiguration, media capture configuration object
-public class NextLevelConfiguration {
+public class NextLevelConfiguration: @unchecked Sendable {
 
     // MARK: - types
 

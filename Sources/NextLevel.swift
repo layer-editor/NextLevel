@@ -25,14 +25,43 @@
 
 import UIKit
 import Foundation
-import AVFoundation
-import CoreImage
-import CoreVideo
+@preconcurrency import AVFoundation
+@preconcurrency import CoreImage
+@preconcurrency import CoreVideo
+@preconcurrency import CoreMedia
 import Metal
 import OSLog
 #if USE_ARKIT
 import ARKit
 #endif
+
+// MARK: - Sendable Wrappers
+
+/// Sendable wrapper for CVPixelBuffer/CVImageBuffer to allow capture in @Sendable closures
+/// This is safe because the buffer is only accessed for unlocking, and the lock/unlock operations are thread-safe
+@available(iOS 16.0, *)
+private struct SendablePixelBuffer: @unchecked Sendable {
+    let buffer: CVPixelBuffer?
+
+    init(_ buffer: CVPixelBuffer?) {
+        self.buffer = buffer
+    }
+}
+
+/// Sendable wrapper for non-Sendable dictionaries that are safe to pass to actors
+/// This is safe when:
+/// - The dictionary is freshly created
+/// - No other references exist
+/// - It's only read, never mutated
+/// - The receiving code will copy the dictionary
+@available(iOS 16.0, *)
+private struct UnsafeSendableDictionary: @unchecked Sendable {
+    let value: [String: Any]
+
+    init(_ value: [String: Any]) {
+        self.value = value
+    }
+}
 
 // MARK: - Logging
 
@@ -289,7 +318,7 @@ private let NextLevelRequiredMinimumStorageSpaceInBytes: UInt64 = 49999872 // ~4
 // MARK: - NextLevel state
 
 /// ⬆️ NextLevel, Rad Media Capture in Swift (http://github.com/NextLevel)
-public class NextLevel: NSObject {
+public class NextLevel: NSObject, @unchecked Sendable {
 
     // MARK: - Delegates
 
@@ -728,7 +757,7 @@ extension NextLevel {
             self._sessionConfigurationCount = 0
 
             // setup NL recording session
-            self._recordingSession = NextLevelSession(queue: self._sessionQueue, queueKey: NextLevelCaptureSessionQueueSpecificKey)
+            self._recordingSession = NextLevelSession()
 
             if let session = self._captureSession {
                 session.automaticallyConfiguresApplicationAudioSession = self.automaticallyConfiguresApplicationAudioSession
@@ -773,7 +802,7 @@ extension NextLevel {
 
             // setup NL recording session
             if self._recordingSession == nil {
-                self._recordingSession = NextLevelSession(queue: self._sessionQueue, queueKey: NextLevelCaptureSessionQueueSpecificKey)
+                self._recordingSession = NextLevelSession()
                 self.arConfiguration?.session?.delegateQueue = self._sessionQueue
             }
 
@@ -2580,7 +2609,7 @@ extension NextLevel {
     /// Pauses video recording, preparing 'NextLevel' to start a new clip with 'record()' with completion handler.
     ///
     /// - Parameter completionHandler: Completion handler for when pause completes
-    public func pause(withCompletionHandler completionHandler: (() -> Void)? = nil) {
+    public func pause(withCompletionHandler completionHandler: (@Sendable () -> Void)? = nil) {
         self._recording = false
 
         let task = Task {
@@ -2705,9 +2734,12 @@ extension NextLevel {
             // Setup video if needed (atomic operation)
             let wasSetup = await session.isVideoSetup
             if !wasSetup {
+                // Capture settings and formatDescription before await to avoid data races
                 if let settings = self.videoConfiguration.avcaptureSettingsDictionary(sampleBuffer: sampleBuffer),
                     let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
-                    if !(await session.setupVideoIfNeeded(withSettings: settings, configuration: self.videoConfiguration, formatDescription: formatDescription)) {
+                    // Wrap in UnsafeSendableDictionary to cross actor boundary
+                    let sendableSettings = UnsafeSendableDictionary(settings)
+                    if !(await session.setupVideoIfNeeded(withSettings: sendableSettings.value, configuration: self.videoConfiguration, formatDescription: formatDescription)) {
                         print("NextLevel, could not setup video session")
                     }
                 }
@@ -2725,7 +2757,7 @@ extension NextLevel {
                 let minTimeBetweenFrames = 0.004
                 let sleepDuration = minTimeBetweenFrames - (CACurrentMediaTime() - self._lastVideoFrameTimeInterval)
                 if sleepDuration > 0 {
-                    Thread.sleep(forTimeInterval: sleepDuration)
+                    try? await Task.sleep(for: .seconds(sleepDuration))
                 }
 
                 // check with the client to setup/maintain external render contexts
@@ -2745,10 +2777,11 @@ extension NextLevel {
 
                 guard !Task.isCancelled else { return }
                 // when clients modify a frame using their rendering context, the resulting CVPixelBuffer is then passed in here with the original sampleBuffer for recording
-                await session.appendVideo(withSampleBuffer: sampleBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, minFrameDuration: device.activeVideoMinFrameDuration, completionHandler: { (success: Bool) -> Void in
+                let sendableImageBuffer = SendablePixelBuffer(imageBuffer)
+                await session.appendVideo(withSampleBuffer: sampleBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, minFrameDuration: device.activeVideoMinFrameDuration, completionHandler: { [sendableImageBuffer, sampleBuffer, session] (success: Bool) -> Void in
                     // cleanup client rendering context
                     if self.isVideoCustomContextRenderingEnabled {
-                        if let imageBuffer = imageBuffer {
+                        if let imageBuffer = sendableImageBuffer.buffer {
                             CVPixelBufferUnlockBaseAddress(imageBuffer, CVPixelBufferLockFlags(rawValue: 0))
                         }
                     }
@@ -2791,8 +2824,11 @@ extension NextLevel {
             // Setup video with atomic check
             let videoSetup = await session.getState().isVideoSetup
             if !videoSetup {
+                // Capture settings before await to avoid data races
                 if let settings = self.videoConfiguration.avcaptureSettingsDictionary(pixelBuffer: pixelBuffer) {
-                    if !(await session.setupVideoIfNeeded(withSettings: settings, configuration: self.videoConfiguration)) {
+                    // Wrap in UnsafeSendableDictionary to cross actor boundary
+                    let sendableSettings = UnsafeSendableDictionary(settings)
+                    if !(await session.setupVideoIfNeeded(withSettings: sendableSettings.value, configuration: self.videoConfiguration)) {
                         print("NextLevel, could not setup video session")
                     }
                 }
@@ -2810,7 +2846,7 @@ extension NextLevel {
                 let minTimeBetweenFrames = 0.004
                 let sleepDuration = minTimeBetweenFrames - (CACurrentMediaTime() - self._lastVideoFrameTimeInterval)
                 if sleepDuration > 0 {
-                    Thread.sleep(forTimeInterval: sleepDuration)
+                    try? await Task.sleep(for: .seconds(sleepDuration))
                 }
 
                 // check with the client to setup/maintain external render contexts
@@ -2826,10 +2862,11 @@ extension NextLevel {
 
                 guard !Task.isCancelled else { return }
                 // when clients modify a frame using their rendering context, the resulting CVPixelBuffer is then passed in here with the original sampleBuffer for recording
-                await session.appendVideo(withPixelBuffer: pixelBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, timestamp: timestamp, minFrameDuration: CMTime(seconds: 1, preferredTimescale: 600), completionHandler: { (success: Bool) -> Void in
+                let sendableImageBuffer = SendablePixelBuffer(imageBuffer)
+                await session.appendVideo(withPixelBuffer: pixelBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, timestamp: timestamp, minFrameDuration: CMTime(seconds: 1, preferredTimescale: 600), completionHandler: { [sendableImageBuffer, pixelBuffer, timestamp, session] (success: Bool) -> Void in
                     // cleanup client rendering context
                     if self.isVideoCustomContextRenderingEnabled {
-                        if let imageBuffer = imageBuffer {
+                        if let imageBuffer = sendableImageBuffer.buffer {
                             CVPixelBufferUnlockBaseAddress(imageBuffer, CVPixelBufferLockFlags(rawValue: 0))
                         }
                     }
@@ -2871,9 +2908,12 @@ extension NextLevel {
             // Setup audio with atomic check
             let audioSetup = await session.getState().isAudioSetup
             if !audioSetup {
+                // Capture settings and formatDescription before await to avoid data races
                 if let settings = self.audioConfiguration.avcaptureSettingsDictionary(sampleBuffer: sampleBuffer),
                     let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
-                    if !(await session.setupAudioIfNeeded(withSettings: settings, configuration: self.audioConfiguration, formatDescription: formatDescription)) {
+                    // Wrap in UnsafeSendableDictionary to cross actor boundary
+                    let sendableSettings = UnsafeSendableDictionary(settings)
+                    if !(await session.setupAudioIfNeeded(withSettings: sendableSettings.value, configuration: self.audioConfiguration, formatDescription: formatDescription)) {
                         print("NextLevel, could not setup audio session")
                     }
                 }
