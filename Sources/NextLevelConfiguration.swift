@@ -180,7 +180,7 @@ public class NextLevelConfiguration: @unchecked Sendable {
 // MARK: - VideoConfiguration
 
 /// NextLevelVideoConfiguration, video capture configuration object
-public class NextLevelVideoConfiguration: NextLevelConfiguration {
+public class NextLevelVideoConfiguration: NextLevelConfiguration, @unchecked Sendable {
 
     // MARK: - types
 
@@ -335,7 +335,7 @@ public class NextLevelVideoConfiguration: NextLevelConfiguration {
 // MARK: - AudioConfiguration
 
 /// NextLevelAudioConfiguration, audio capture configuration object
-public class NextLevelAudioConfiguration: NextLevelConfiguration {
+public class NextLevelAudioConfiguration: NextLevelConfiguration, @unchecked Sendable {
 
     // MARK: - types
 
@@ -440,7 +440,7 @@ public class NextLevelAudioConfiguration: NextLevelConfiguration {
 // MARK: - PhotoConfiguration
 
 /// NextLevelPhotoConfiguration, photo capture configuration object
-public class NextLevelPhotoConfiguration: NextLevelConfiguration {
+public class NextLevelPhotoConfiguration: NextLevelConfiguration, @unchecked Sendable {
 
     /// Codec used to encode photo, AV dictionary key AVVideoCodecKey
     public var codec: AVVideoCodecType = AVVideoCodecType.hevc
@@ -513,7 +513,7 @@ public class NextLevelPhotoConfiguration: NextLevelConfiguration {
 // MARK: - ARConfiguration
 
 /// NextLevelARConfiguration, augmented reality configuration object
-public class NextLevelARConfiguration: NextLevelConfiguration {
+public class NextLevelARConfiguration: NextLevelConfiguration, @unchecked Sendable {
 
     #if USE_ARKIT
     /// ARKit configuration

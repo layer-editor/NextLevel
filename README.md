@@ -4,7 +4,7 @@
 
 `NextLevel` is a Swift camera system designed for easy integration, customized media capture, and image streaming in iOS.
 
-[![Swift Version](https://img.shields.io/badge/language-swift%206.0-brightgreen.svg)](https://developer.apple.com/swift) [![Platform](https://img.shields.io/badge/platform-iOS%2015.0%2B-blue.svg)](https://developer.apple.com/ios/) [![SPM Compatible](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg)](https://swift.org/package-manager/) [![Pod Version](https://img.shields.io/cocoapods/v/NextLevel.svg?style=flat)](http://cocoadocs.org/docsets/NextLevel/) [![GitHub license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](https://github.com/NextLevel/NextLevel/blob/master/LICENSE)
+[![Swift Version](https://img.shields.io/badge/language-swift%206.0-brightgreen.svg)](https://developer.apple.com/swift) [![Platform](https://img.shields.io/badge/platform-iOS%2016.0%2B-blue.svg)](https://developer.apple.com/ios/) [![SPM Compatible](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg)](https://swift.org/package-manager/) [![Pod Version](https://img.shields.io/cocoapods/v/NextLevel.svg?style=flat)](http://cocoadocs.org/docsets/NextLevel/) [![GitHub license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](https://github.com/NextLevel/NextLevel/blob/master/LICENSE)
 
 |  | Features |
 |:---------:|:---------------------------------------------------------------|
@@ -41,12 +41,12 @@ The library provides powerful camera controls and features for capturing photos 
 - **⚡ Better Performance** - Proper state management and memory handling for long recordings
 - **📐 Multi-Clip Recording Improvements** - Fixed timestamp offset bugs for seamless clip merging
 - **🎯 Configurable Network Optimization** - Control shouldOptimizeForNetworkUse for faster local recording (#257)
-- **📱 iOS 15+ AsyncStream Events** - Modern reactive event system for camera state changes
+- **📱 iOS 16+ AsyncStream Events** - Modern reactive event system for camera state changes
 - **🔙 Backwards Compatible** - Legacy delegate-based API still works
 
 ### Requirements
 
-- **iOS 15.0+** for async/await APIs and modern concurrency features
+- **iOS 16.0+** for modern concurrency features and Task.sleep(for:) API
 - **Swift 6.0**
 - **Xcode 16.0+**
 
