@@ -36,10 +36,7 @@ let package = Package(
     targets: [
       .target(
           name: "NextLevel",
-          path: "Sources",
-          swiftSettings: [
-              .enableUpcomingFeature("ExistentialAny")
-          ]
+          path: "Sources"
       ),
       .testTarget(
           name: "NextLevelTests",
