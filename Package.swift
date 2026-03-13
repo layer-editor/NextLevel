@@ -38,9 +38,12 @@ let package = Package(
           name: "NextLevel",
           path: "Sources",
           swiftSettings: [
-              .enableUpcomingFeature("StrictConcurrency"),
               .enableUpcomingFeature("ExistentialAny")
           ]
+      ),
+      .testTarget(
+          name: "NextLevelTests",
+          dependencies: ["NextLevel"]
       )
     ],
     swiftLanguageModes: [.version("6")]

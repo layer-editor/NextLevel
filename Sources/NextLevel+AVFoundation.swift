@@ -112,14 +112,44 @@ extension AVCaptureDevice {
         return nil
     }
 
+    /// Returns the default device priority order for the desired position.
+    ///
+    /// Composite back cameras come first so Pro devices can zoom below 1x and
+    /// hand off between constituent lenses more smoothly.
+    public class func defaultPrimaryVideoDeviceTypes(forPosition position: AVCaptureDevice.Position) -> [AVCaptureDevice.DeviceType] {
+        switch position {
+        case .back:
+            return [
+                .builtInTripleCamera,
+                .builtInDualWideCamera,
+                .builtInDualCamera,
+                .builtInWideAngleCamera,
+            ]
+        case .front:
+            return [
+                .builtInTrueDepthCamera,
+                .builtInWideAngleCamera,
+            ]
+        default:
+            return [
+                .builtInTripleCamera,
+                .builtInDualWideCamera,
+                .builtInDualCamera,
+                .builtInTrueDepthCamera,
+                .builtInWideAngleCamera,
+            ]
+        }
+    }
+
 	/// Returns the first available camera device of specified types.
 	///
 	/// - Parameters:
 	///   - position: Desired position of the device
 	///   - prioritizedDeviceTypes: Device types of interest, in descending order
 	/// - Returns: Primary video capture device found, otherwise nil
-	public class func primaryVideoDevice(forPosition position: AVCaptureDevice.Position, prioritizedDeviceTypes: [AVCaptureDevice.DeviceType] = [/* .builtInTripleCamera,*/ .builtInDualCamera, .builtInWideAngleCamera]) -> AVCaptureDevice? {
-		AVCaptureDevice.DiscoverySession(deviceTypes: prioritizedDeviceTypes, mediaType: AVMediaType.video, position: position).devices.first
+	public class func primaryVideoDevice(forPosition position: AVCaptureDevice.Position, prioritizedDeviceTypes: [AVCaptureDevice.DeviceType]? = nil) -> AVCaptureDevice? {
+        let deviceTypes = prioritizedDeviceTypes ?? defaultPrimaryVideoDeviceTypes(forPosition: position)
+		return AVCaptureDevice.DiscoverySession(deviceTypes: deviceTypes, mediaType: AVMediaType.video, position: position).devices.first
 	}
 
     /// Returns the default video capture device, otherwise nil.
