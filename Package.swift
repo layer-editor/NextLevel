@@ -43,5 +43,5 @@ let package = Package(
           dependencies: ["NextLevel"]
       )
     ],
-    swiftLanguageModes: [.version("6")]
+    swiftLanguageModes: [.version("5")]
 )
